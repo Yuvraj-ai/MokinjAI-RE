@@ -1,0 +1,49 @@
+import { create } from 'zustand'
+import apiClient from '../api/client'
+import type { User } from '../types/auth'
+
+export type { User }
+
+interface AuthState {
+  user: User | null
+  isAuthenticated: boolean
+  login: (user: User, accessToken: string, refreshToken: string) => void
+  logout: () => Promise<void>
+  /** Server-side sign-out without an API call — the auth-death path shared by
+   * the interceptor and the stream clients via `handleAuthFailure()`. */
+  forceSignOut: () => void
+  setUser: (user: User) => void
+}
+
+export const useAuthStore = create<AuthState>((set) => ({
+  user: null,
+  isAuthenticated: !!localStorage.getItem('access_token'),
+
+  login: (user, accessToken, refreshToken) => {
+    localStorage.setItem('access_token', accessToken)
+    localStorage.setItem('refresh_token', refreshToken)
+    set({ user, isAuthenticated: true })
+  },
+
+  logout: async () => {
+    // The request must go out before the tokens are cleared, or it carries no
+    // Authorization header and the server cannot tell which session to end.
+    try {
+      await apiClient.post('/api/auth/logout')
+    } catch {
+      // Best effort. A failed call must not leave the user stuck with a token
+      // they believe has been discarded, so clear locally either way.
+    }
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    set({ user: null, isAuthenticated: false })
+  },
+
+  forceSignOut: () => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    set({ user: null, isAuthenticated: false })
+  },
+
+  setUser: (user) => set({ user }),
+}))

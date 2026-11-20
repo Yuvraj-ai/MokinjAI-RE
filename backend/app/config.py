@@ -1,0 +1,98 @@
+from pathlib import Path
+
+from pydantic_settings import BaseSettings
+from functools import lru_cache
+
+# Resolve .env from the repository root, not the process CWD. pydantic-settings
+# resolves a relative env_file against the CWD, so the same `cd backend` that
+# every documented command uses silently skipped the real .env and fell back to
+# the defaults below. Alembic (backend/alembic/env.py) resolves .env by its own
+# absolute path; both now point at this same repo-root file, so the app and
+# Alembic agree on one database.
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+
+class Settings(BaseSettings):
+    # Database
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/agentbuilder"
+
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379"
+
+    # Public /v1 surface
+    PUBLIC_API_RATE_LIMIT_PER_MINUTE: int = 60
+
+    # JWT
+    JWT_SECRET_KEY: str = "your-super-secret-key-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # LLM Providers
+    OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+
+
+    # Fernet key for LLM and MCP secrets at rest. Generate with Fernet.generate_key().
+    LLM_ENCRYPTION_KEY: str = ""
+    # Telegram
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_ADMIN_CHAT_ID: str = ""
+
+    # OTP
+    OTP_EXPIRY_SECONDS: int = 300
+
+    # Sandbox (ADR-010). These are the limits untrusted code runs under.
+    # SANDBOX_BACKEND is "auto" (prefer Docker, fall back to the subprocess),
+    # "docker" (require Docker — a deployment can refuse to run un-isolated), or
+    # "subprocess" (never touch Docker; what the suite uses where the socket is not
+    # reachable).
+    SANDBOX_BACKEND: str = "auto"
+    SANDBOX_IMAGE: str = "mokinjay-sandbox:1"
+    SANDBOX_DOCKER_BIN: str = "docker"
+    # The remote daemon. The URL is public but the token is InstaBox's private-port
+    # bearer and `SECRET` is our own HMAC; rotating one is independent of the other.
+    SANDBOX_DAEMON_URL: str = ""
+    SANDBOX_DAEMON_TOKEN: str = ""
+    SANDBOX_DAEMON_SECRET: str = ""
+    SANDBOX_DAEMON_TIMEOUT_GRACE_SECONDS: float = 30.0
+    SANDBOX_MEMORY: str = "256m"
+    SANDBOX_CPUS: str = "0.5"
+    SANDBOX_OUTPUT_TMPFS_MB: int = 64
+    SANDBOX_WORK_TMPFS_MB: int = 64
+    SANDBOX_TIMEOUT_SECONDS: float = 30.0
+    SANDBOX_KERNEL_GRACE_SECONDS: float = 10.0
+    SANDBOX_MAX_RUN_SECONDS: int = 1800
+
+    # Cloud file import (OneDrive). The secret never leaves the server; the redirect
+    # URI must match the Entra registration exactly, including the API host.
+    MS_CLIENT_ID: str = ""
+    MS_CLIENT_SECRET: str = ""
+    MS_REDIRECT_URI: str = ""
+
+    # App
+    BACKEND_HOST: str = "0.0.0.0"
+    BACKEND_PORT: int = 8001
+    FRONTEND_URL: str = "http://localhost:5173"
+
+    # Object storage (ADR-011). Empty credentials select the filesystem backend; a
+    # complete S3 credential set selects object storage. Resolved by
+    # app/services/storage/__init__.py:get_storage() and read nowhere else, so the
+    # selection rule has exactly one home.
+    STORAGE_LOCAL_PATH: str = str(Path(__file__).resolve().parents[1] / "storage")
+    STORAGE_S3_BUCKET: str = ""
+    STORAGE_S3_ENDPOINT_URL: str = ""
+    STORAGE_S3_REGION: str = "us-east-1"
+    STORAGE_S3_ACCESS_KEY_ID: str = ""
+    STORAGE_S3_SECRET_ACCESS_KEY: str = ""
+
+    # Upload ceiling, enforced while reading the body (Task 5). A handler limit, not a
+    # transport limit: see the spec's section 3.
+    STORAGE_MAX_UPLOAD_BYTES: int = 95 * 1024 * 1024
+
+    model_config = {"env_file": ENV_FILE, "extra": "ignore"}
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()
