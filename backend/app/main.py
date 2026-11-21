@@ -29,6 +29,7 @@ from app.routers import (
     search_credentials,
     cloud_connections,
     imports,
+    activity,
 )
 from app.routers.public import router as public_router
 from app.utils.errors import AppException
@@ -165,6 +166,11 @@ app.include_router(
     imports.router,
     prefix="/api/workspaces/{workspace_id}/imports",
     tags=["imports"],
+)
+app.include_router(
+    activity.router,
+    prefix="/api/workspaces/{workspace_id}/activity",
+    tags=["activity"],
 )
 
 
