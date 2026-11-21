@@ -4,7 +4,7 @@ from app.models.workflow import Workflow, WorkflowVersion
 from app.models.execution import Execution
 from app.models.knowledge import FileFolder, Document
 from app.models.cloud_connection import CloudConnection
-from app.models.api_key import ApiKey, AuditLog
+from app.models.api_key import ApiKey, ApiKeyAgent, AuditLog
 from app.models.prompt import PromptTemplate
 from app.models.llm_profile import LlmProfile
 from app.models.structured_output import StructuredOutput
@@ -36,6 +36,7 @@ __all__ = [
     "Document",
     "CloudConnection",
     "ApiKey",
+    "ApiKeyAgent",
     "AuditLog",
     "PromptTemplate",
     "LlmProfile",

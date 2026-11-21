@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Numeric, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,7 +45,34 @@ class ApiKey(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Agent access. True = every agent in the workspace, now and later. False =
+    # only the agents listed in `api_key_agents`. Existing keys migrate to True.
+    all_agents: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+
     workspace = relationship("Workspace", back_populates="api_keys")
+    agent_links = relationship(
+        "ApiKeyAgent", cascade="all, delete-orphan", lazy="selectin", back_populates="key"
+    )
+
+
+class ApiKeyAgent(Base):
+    """One agent a non-"all agents" key may call."""
+
+    __tablename__ = "api_key_agents"
+
+    api_key_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("api_keys.id", ondelete="CASCADE"), primary_key=True
+    )
+    agent_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+
+    key = relationship("ApiKey", back_populates="agent_links")
 
 
 class AuditLog(Base):

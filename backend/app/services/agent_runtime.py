@@ -510,17 +510,46 @@ def _message_text(message: Any) -> str:
     return ""
 
 
-def _add_usage(total: dict[str, int], metadata: Any) -> None:
+def new_usage() -> dict[str, Any]:
+    """An empty usage record.
+
+    `cache_reported` / `reasoning_reported` stay False until a provider actually
+    sends the detail block, so a real 0 can be told from "not reported"."""
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_reported": False,
+        "reasoning_reported": False,
+    }
+
+
+def _add_usage(total: dict[str, Any], metadata: Any) -> None:
+    """Fold one model call's LangChain `usage_metadata` into the run total.
+
+    LangChain standardises `input_token_details` (cache_read, cache_creation)
+    and `output_token_details` (reasoning); each provider adapter fills what the
+    provider returns."""
     if not isinstance(metadata, dict):
         return
     total["input_tokens"] += int(metadata.get("input_tokens") or 0)
     total["output_tokens"] += int(metadata.get("output_tokens") or 0)
     total["total_tokens"] += int(metadata.get("total_tokens") or 0)
-    details = metadata.get("input_token_details") or {}
-    total["cache_read_tokens"] += int(details.get("cache_read") or 0)
+    input_details = metadata.get("input_token_details")
+    if isinstance(input_details, dict) and input_details:
+        total["cache_read_tokens"] += int(input_details.get("cache_read") or 0)
+        total["cache_creation_tokens"] += int(input_details.get("cache_creation") or 0)
+        total["cache_reported"] = True
+    output_details = metadata.get("output_token_details")
+    if isinstance(output_details, dict) and output_details:
+        total["reasoning_tokens"] += int(output_details.get("reasoning") or 0)
+        total["reasoning_reported"] = True
 
 
-def _cost(profile: LlmProfile, usage: dict[str, int]) -> float:
+def _cost(profile: LlmProfile, usage: dict[str, Any]) -> float:
     cached = min(usage["cache_read_tokens"], usage["input_tokens"])
     uncached = usage["input_tokens"] - cached
     return (
@@ -539,12 +568,18 @@ async def _mark_execution(
     cost: float | None = None,
     error: str | None = None,
     started: float | None = None,
+    model: tuple[str, str] | None = None,
+    ttft_ms: int | None = None,
 ) -> None:
     async with async_session() as db:
         execution = await db.get(Execution, execution_id)
         if execution is None:
             return
         execution.status = status
+        if model is not None:
+            execution.provider, execution.model_id = model
+        if ttft_ms is not None:
+            execution.ttft_ms = ttft_ms
         if output is not None:
             execution.output_data = output
         if usage is not None:
@@ -584,7 +619,7 @@ async def _write_assistant_message(
     activity: list[dict],
     structured: Any,
     status: str,
-    usage: dict[str, int],
+    usage: dict[str, Any],
     cost: float | None,
 ) -> None:
     async with async_session() as db:
@@ -648,12 +683,9 @@ async def stream_turn(
     reasoning_parts: list[str] = []
     activity: list[dict[str, Any]] = []
     tool_started: dict[str, float] = {}
-    usage = {
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "total_tokens": 0,
-        "cache_read_tokens": 0,
-    }
+    usage = new_usage()
+    model_snapshot: tuple[str, str] | None = None
+    ttft_ms: int | None = None
     user_message_id: str | None = None
     assistant_message_id: str | None = None
 
@@ -724,6 +756,7 @@ async def stream_turn(
                 db, workspace_id, validated, sandbox, depth=0, filenames=filenames
             )
             graph = build_graph(validated, agent, tools, streaming=True)
+            model_snapshot = (validated.profile.provider, validated.profile.model_id)
             await _bump_run_usage(db, workspace_id, validated)
             await db.commit()
 
@@ -754,6 +787,7 @@ async def stream_turn(
         structured: Any = None
         last_flush = 0.0
 
+        model_started = time.monotonic()
         async for event in graph.astream_events({"messages": history}, version="v2"):
             kind = event["event"]
             metadata = event.get("metadata") or {}
@@ -762,6 +796,8 @@ async def stream_turn(
             if kind == "on_chat_model_stream" and not nested:
                 chunk = event["data"].get("chunk")
                 reasoning = _reasoning_delta(chunk)
+                if ttft_ms is None and (reasoning or _message_text(chunk)):
+                    ttft_ms = int((time.monotonic() - model_started) * 1000)
                 if reasoning:
                     reasoning_parts.append(reasoning)
                     yield {"event": "reasoning", "data": {"delta": reasoning}}
@@ -862,7 +898,15 @@ async def stream_turn(
             usage=usage,
             cost=cost,
         )
-        await _mark_execution(execution_id, "completed", usage=usage, cost=cost, started=started)
+        await _mark_execution(
+            execution_id,
+            "completed",
+            usage=usage,
+            cost=cost,
+            started=started,
+            model=model_snapshot,
+            ttft_ms=ttft_ms,
+        )
         yield {
             "event": "done",
             "data": {"usage": usage, "cost_usd": round(cost, 6), "status": "completed"},
@@ -884,12 +928,21 @@ async def stream_turn(
                 usage=usage,
                 cost=None,
             )
-        await _mark_execution(execution_id, "cancelled", started=started)
+        await _mark_execution(
+            execution_id, "cancelled", started=started, model=model_snapshot, ttft_ms=ttft_ms
+        )
         raise
 
     except CompositionError as exc:
         detail = "; ".join(f"{error.field}: {error.message}" for error in exc.errors)
-        await _mark_execution(execution_id, "failed", error=detail, started=started)
+        await _mark_execution(
+            execution_id,
+            "failed",
+            error=detail,
+            started=started,
+            model=model_snapshot,
+            ttft_ms=ttft_ms,
+        )
         if assistant_message_id is not None and not content_parts and not reasoning_parts and not activity:
             await _delete_assistant_message(assistant_message_id)
         yield {"event": "error", "data": {"detail": detail}}
@@ -897,7 +950,14 @@ async def stream_turn(
     except Exception as exc:
         logger.exception(f"Playground turn {execution_id} failed")
         detail = str(exc).strip().replace("\n", " ") or exc.__class__.__name__
-        await _mark_execution(execution_id, "failed", error=detail, started=started)
+        await _mark_execution(
+            execution_id,
+            "failed",
+            error=detail,
+            started=started,
+            model=model_snapshot,
+            ttft_ms=ttft_ms,
+        )
         if assistant_message_id is not None and not content_parts and not reasoning_parts and not activity:
             await _delete_assistant_message(assistant_message_id)
         else:
