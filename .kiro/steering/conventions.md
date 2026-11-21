@@ -15,6 +15,10 @@ inclusion: always
 
 ## Git and docs hygiene
 
+- **Commit as you go, one logical change per commit** (a feature, a bug fix, a docs update), each with a clear message. Do not batch unrelated work. Do not push without being asked.
+- **Never run migrations against the hosted database without explicit approval.** The dev deployment shares it, and the deployed service runs `alembic upgrade head` on every boot, so a migration applied ahead of a code deploy can stop the old code from starting. Verify schema changes on a scratch local database; migrate hosted only when told.
+- Reverting a hosted migration is also a hosted change: ask first.
+
 - `docs/` is gitignored and local-only by the owner's request. Never force-add it.
 - `.kiro/` IS tracked. Keep it free of secrets, commit hashes, and calendar dates. Describe state, not history.
 - Never copy `.env` values into committed files. `.env`, `*.bak`, `keys.txt`, `.claude/`, `.superpowers/`, `.playwright-mcp/`, `.design-port/` are ignored.
@@ -41,6 +45,13 @@ inclusion: always
 - **Agents:** composition validated at run start, nothing frozen. Deleting a referenced LLM profile or connection returns 409. Agent duplication does not copy data-source attachments (known gap).
 - **Conflicts** return 409, not 400.
 - **Token counts:** server exact (`o200k_base`); the frontend live editor uses a word-based estimate labelled `~N tokens`.
+
+## Telemetry and activity
+
+- LangChain standardises `usage_metadata`: `input_token_details` (`cache_read`, `cache_creation`) and `output_token_details` (`reasoning`). It does not report time to first token, so the runtime measures it.
+- A run stores its provider/model snapshot and `ttft_ms` on the execution. `token_usage` carries `cache_reported` and `reasoning_reported` so a reported 0 is distinguishable from "provider reports nothing". Never present unreported detail as zero.
+- The Activity dashboard ranks and charts from `executions`; the previous period is `None` (shown as "No prior data") when it holds no runs.
+- API key agent access: `all_agents` plus an `api_key_agents` join. Check access before looking the agent up, so unknown and forbidden ids answer identically. A key created through the service defaults to all agents; the API requires an explicit choice.
 
 ## Repository guard tests
 

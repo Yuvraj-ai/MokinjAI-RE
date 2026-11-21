@@ -18,6 +18,12 @@ The earlier Phase 3 design specs were voided by the owner. They are research rec
 
 Sessions, PostgreSQL-only, structured outputs, LLM profiles, prompt token counts, repo hygiene guards, workspaces, legacy workflows and engine, executions, auth/RBAC, tools, skills, seed script, connectors, file library (replaced the original Knowledge Base), data sources (Postgres, MySQL, MongoDB find-only), Docker sandbox, agents, Playground, API keys with public `/v1`, remote sandbox host, Render deployment with object storage, and cloud file import (OneDrive OAuth per user, Google Picker) through one `import_document()` path.
 
+## Activity dashboard, Activity Logs, key agent access
+
+Built and verified in a browser against a scratch database: dashboard as home, empty and populated states, logs with detail drawer and sessions, shared filters held in the URL, key Activity and Logs buttons, per-key agent access (create, edit after use, enforcement on `/v1`). The schema change for this work is a migration that adds execution telemetry columns, `api_keys.all_agents`, and `api_key_agents`. It has NOT been applied to the hosted database; the deploy will apply it at boot.
+
+Not built: Trends and Explore tabs, Guardrails, live mode, export, reasoning tokens shown unless a model reports them.
+
 ## Known gaps (open)
 
 - Test suite is not fully green: a small number of `@tool` decorator tests in `test_builtin_tools.py` fail (reproduce when the file runs alone).

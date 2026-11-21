@@ -17,7 +17,7 @@ backend/
     schemas/           Pydantic request/response models
     routers/           agents, api_keys, auth, cloud_connections, connectors, executions, external_databases,
                        files, imports, llm_profiles, playground, prompts, public, search_credentials,
-                       skills, structured_outputs, tools, users, workflows, workspaces
+                       skills, structured_outputs, tools, users, workflows, workspaces, activity
     services/          domain logic (see below)
     tools/             built-in @tool registry (builtin.py, registry.py)
     middleware/        auth + RBAC dependencies
@@ -29,7 +29,8 @@ backend/
     agent_runtime / agent_composition / agent_capabilities / agent_tools / agent_validation / agent_dependencies
     structured_output (pure compiler, no DB)   skill (compiler)   tool_schema (AST extraction)
     connector_catalog / connector_runtime      web_search         model_profiles / llm_probe
-    api_keys / public_limits                   sessions / otp_store / telegram / seed
+    api_keys (incl. agent access) / public_limits   sessions / otp_store / telegram / seed
+    activity (dashboard + logs aggregations over executions)
     sandbox/       kernel.py (stdlib-only), protocol, backends (Docker, Subprocess, Instabox), session, budget, daemon/
     data_sources/  guard (sqlglot), mongo_guard, postgres, mysql, mongo, ssrf, schema_cache
     storage/       base, filesystem, s3
@@ -41,12 +42,14 @@ backend/
 
 frontend/src/
   App.tsx            route tree
-  api/               Axios wrappers per resource
-  pages/             Agents, Playground, ApiKeys(+Detail), Dashboard(workflows), WorkflowEditor, ExecutionHistory,
+  api/               Axios wrappers per resource (activity.ts for the dashboard and logs)
+  pages/             Activity (dashboard), ActivityLogs, Agents, Playground, ApiKeys(+Detail), Dashboard(workflows), WorkflowEditor,
+                     ExecutionHistory (retired, replaced by ActivityLogs, kept unrouted),
                      Prompts, StructuredOutputs, Files, DataSources, Skills, LlmProfiles, Tools, Connectors, Login
   components/        agents/ (config dialog, pickers), flow/ (legacy canvas), execution/, auth/, layout/, dashboard/
   store/             Zustand (auth, workflow, execution, theme)
-  hooks/ types/ lib/
+  lib/               activityFilters (URL-held filter state), chartColors, format, agentAccess
+  hooks/ types/
 
 docker/              Dockerfile.backend, Dockerfile.frontend, Dockerfile.sandbox
 scripts/             generate_fernet_key.py, generate_jwt_secret.py
@@ -58,11 +61,12 @@ memory.md            local-only agent memory file (gitignored)
 
 ## Frontend routes
 
-`/login`, `/agents`, `/playground`, `/keys`, `/keys/:keyId`, `/workflows`, `/workflows/:id/edit`, `/executions`, `/prompts`, `/structured-outputs`, `/files`, `/data-sources`, `/skills`, `/llms`, `/tools`, `/connectors`. Root redirects to `/workflows`.
+`/login`, `/dashboard`, `/logs`, `/agents`, `/playground`, `/keys`, `/keys/:keyId`, `/workflows`, `/workflows/:id/edit`, `/prompts`, `/structured-outputs`, `/files`, `/data-sources`, `/skills`, `/llms`, `/tools`, `/connectors`. Root and a successful login go to `/dashboard`. `/executions` redirects to `/logs`.
 
 ## API shape
 
 - Internal REST under `/api/...`, workspace-scoped: `/api/workspaces/{workspace_id}/<resource>`.
+- Activity: `/activity/summary`, `/activity/logs`, `/activity/logs/{id}`, `/activity/sessions`, all taking the same filters (`from`, `to`, `tz`, `api_key_id`, `agent_id`, `source`, `model`).
 - Public API served under `/v1` (separate sub-app; Bearer `mk_...` key).
 - Backend port is **8001**. A silent `/v1/models` stub on the main app exists to stop local AI tools probing it.
 
