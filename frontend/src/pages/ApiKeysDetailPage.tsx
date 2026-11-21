@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, BarChart3, ListChecks } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
+import { listAgents, type AgentListItem } from '../api/agents'
+import AgentAccessPicker from '../components/apikeys/AgentAccessPicker'
+import { accessIsValid } from '../lib/agentAccess'
+import { withFilters } from '../lib/activityFilters'
 import {
   disableApiKey,
   enableApiKey,
@@ -10,6 +14,7 @@ import {
   revokeApiKey,
   rotateApiKey,
   updateApiKey,
+  type AgentAccess,
   type ApiKeyRow,
   type ApiKeyUsage,
   type KeyLogRow,
@@ -56,6 +61,11 @@ function BudgetRing({ spend, limit }: { spend: number; limit: number | null }) {
   )
 }
 
+/** Compare access settings regardless of the order agents were ticked in. */
+function normalise(access: AgentAccess | null) {
+  return access ? { mode: access.mode, agent_ids: [...access.agent_ids].sort() } : null
+}
+
 function SpendChart({ daily }: { daily: { date: string; cost: number }[] }) {
   const max = Math.max(...daily.map((d) => d.cost), 0.000001)
   return (
@@ -82,6 +92,12 @@ export default function ApiKeysDetailPage() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [plaintext, setPlaintext] = useState<string | null>(null)
   const [confirmRotate, setConfirmRotate] = useState(false)
+  const [agents, setAgents] = useState<AgentListItem[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(true)
+  // Draft of the agent access section; saved explicitly, any time.
+  const [accessDraft, setAccessDraft] = useState<AgentAccess | null>(null)
+  const [savingAccess, setSavingAccess] = useState(false)
+  const [accessSaved, setAccessSaved] = useState(false)
 
   useEffect(() => {
     import('../api/workspaces').then(({ listWorkspaces }) =>
@@ -93,7 +109,16 @@ export default function ApiKeysDetailPage() {
 
   const refresh = useCallback(() => {
     if (!workspaceId || !keyId) return
-    getApiKey(workspaceId, keyId).then(setKey).catch(() => setError('Could not load the key.'))
+    getApiKey(workspaceId, keyId)
+      .then((row) => {
+        setKey(row)
+        setAccessDraft(row.agent_access)
+      })
+      .catch(() => setError('Could not load the key.'))
+    listAgents(workspaceId)
+      .then(setAgents)
+      .catch(() => {})
+      .finally(() => setAgentsLoading(false))
     getApiKeyUsage(workspaceId, keyId).then(setUsage).catch(() => {})
     getApiKeyLogs(workspaceId, keyId).then(setLogs).catch(() => {})
   }, [workspaceId, keyId])
@@ -125,9 +150,23 @@ export default function ApiKeysDetailPage() {
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> API keys
         </Link>
 
-        <div className="mb-6 mt-3 flex items-center gap-3">
+        <div className="mb-6 mt-3 flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight text-ink">{key.name}</h1>
           <StatusChip status={key.status} />
+          <div className="ml-auto flex gap-2">
+            <Link
+              to={withFilters('/dashboard', { apiKeyId: key.id })}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-[13px] text-ink hover:bg-surface-muted"
+            >
+              <BarChart3 className="h-4 w-4" aria-hidden /> Activity
+            </Link>
+            <Link
+              to={withFilters('/logs', { apiKeyId: key.id })}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-[13px] text-ink hover:bg-surface-muted"
+            >
+              <ListChecks className="h-4 w-4" aria-hidden /> Logs
+            </Link>
+          </div>
         </div>
         <p className="mb-6 font-mono text-[12px] text-ink-subtle">{key.prefix}…</p>
 
@@ -198,6 +237,52 @@ export default function ApiKeysDetailPage() {
                 Daily at midnight UTC, weekly on Monday, monthly on the 1st.
               </p>
             </div>
+          </div>
+        </div>
+
+        {/* Agent access */}
+        <div className="mb-6 rounded-xl border border-line bg-surface p-6" data-testid="agent-access-section">
+          <p className="mb-1 text-[12.5px] font-medium text-ink">Agent access</p>
+          <p className="mb-3 text-[11.5px] text-ink-subtle">
+            Choose which agents this key can call. You can change this at any time; it applies from the
+            next request.
+          </p>
+          <AgentAccessPicker
+            value={accessDraft}
+            onChange={(next) => {
+              setAccessDraft(next)
+              setAccessSaved(false)
+            }}
+            agents={agents}
+            loading={agentsLoading}
+          />
+          <div className="mt-3 flex items-center justify-end gap-3">
+            {accessSaved && <span className="text-[12px] text-status-success">Saved</span>}
+            <button
+              disabled={
+                savingAccess ||
+                !accessIsValid(accessDraft) ||
+                JSON.stringify(normalise(accessDraft)) === JSON.stringify(normalise(key.agent_access))
+              }
+              onClick={async () => {
+                if (!workspaceId || !keyId || !accessDraft) return
+                setSavingAccess(true)
+                try {
+                  const updated = await updateApiKey(workspaceId, keyId, { agent_access: accessDraft })
+                  setKey(updated)
+                  setAccessDraft(updated.agent_access)
+                  setAccessSaved(true)
+                  setError(null)
+                } catch {
+                  setError('Could not save agent access.')
+                } finally {
+                  setSavingAccess(false)
+                }
+              }}
+              className="rounded-lg bg-primary px-4 py-2 text-[13px] font-medium text-primary-fg disabled:opacity-50"
+            >
+              Save access
+            </button>
           </div>
         </div>
 

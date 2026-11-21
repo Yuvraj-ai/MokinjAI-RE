@@ -2,12 +2,16 @@ import { useCallback, useEffect, useState } from 'react'
 import { KeyRound, Plus, Settings2 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { listWorkspaces } from '../api/workspaces'
+import { listAgents, type AgentListItem } from '../api/agents'
 import {
   listApiKeys,
+  type AgentAccess,
   type ApiKeyRow,
   type ApiKeyCreated,
   createApiKey,
 } from '../api/apiKeys'
+import AgentAccessPicker from '../components/apikeys/AgentAccessPicker'
+import { accessIsValid, accessLabel } from '../lib/agentAccess'
 import { cn } from '../lib/utils'
 
 const EXPIRATION_OPTIONS = [
@@ -61,11 +65,24 @@ export function NewKeyDialog({
   const [expirationDays, setExpirationDays] = useState<number | null>(90)
   const [creditLimit, setCreditLimit] = useState('')
   const [resetPeriod, setResetPeriod] = useState<string | null>(null)
+  // No default: the builder must choose all agents or a selection.
+  const [access, setAccess] = useState<AgentAccess | null>(null)
+  const [agents, setAgents] = useState<AgentListItem[]>([])
+  const [agentsLoading, setAgentsLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  useEffect(() => {
+    listAgents(workspaceId)
+      .then(setAgents)
+      .catch(() => setError('Could not load your agents.'))
+      .finally(() => setAgentsLoading(false))
+  }, [workspaceId])
+
+  const canCreate = !!name.trim() && accessIsValid(access) && !busy
+
   const create = async () => {
-    if (!name.trim() || busy) return
+    if (!canCreate || !access) return
     setBusy(true)
     setError(null)
     try {
@@ -77,6 +94,7 @@ export function NewKeyDialog({
             : null,
         credit_limit_usd: creditLimit.trim() || null,
         credit_reset_period: (creditLimit.trim() ? resetPeriod : null) as never,
+        agent_access: access,
       })
       onCreated(created)
     } catch {
@@ -88,7 +106,7 @@ export function NewKeyDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-xl border border-line bg-surface p-6">
+      <div className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-xl border border-line bg-surface p-6">
         <div className="mb-4 flex items-start justify-between">
           <h2 className="text-[15px] font-semibold text-ink">New API key</h2>
           <button onClick={onClose} className="text-ink-subtle hover:text-ink" aria-label="Close">
@@ -145,10 +163,19 @@ export function NewKeyDialog({
           </select>
         </div>
 
+        <div className="mb-4">
+          <AgentAccessPicker
+            value={access}
+            onChange={setAccess}
+            agents={agents}
+            loading={agentsLoading}
+          />
+        </div>
+
         <div className="flex justify-end">
           <button
             onClick={() => void create()}
-            disabled={!name.trim() || busy}
+            disabled={!canCreate}
             className="rounded-lg bg-primary px-4 py-2 text-[13px] font-medium text-primary-fg disabled:opacity-50"
           >
             Create
@@ -256,6 +283,7 @@ export default function ApiKeysPage() {
               <tr className="border-b border-line text-[10.5px] uppercase tracking-wider text-ink-subtle">
                 <th className="px-4 py-3 font-semibold">Key</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
+                <th className="px-4 py-3 font-semibold">Agents</th>
                 <th className="px-4 py-3 font-semibold">Expires</th>
                 <th className="px-4 py-3 font-semibold">Last Used</th>
                 <th className="px-4 py-3 font-semibold">Key limit</th>
@@ -265,7 +293,7 @@ export default function ApiKeysPage() {
             <tbody>
               {keys.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-[13px] text-ink-subtle">
+                  <td colSpan={7} className="px-4 py-10 text-center text-[13px] text-ink-subtle">
                     No API keys yet. Create one to run your agents from anywhere.
                   </td>
                 </tr>
@@ -287,6 +315,9 @@ export default function ApiKeysPage() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusChip status={key.status} />
+                    </td>
+                    <td className="px-4 py-3 text-[12.5px] text-ink-muted" data-testid="key-agents">
+                      {accessLabel(key.agent_access)}
                     </td>
                     <td className="px-4 py-3 text-[12.5px] text-ink-muted">
                       {key.expires_at

@@ -8,6 +8,12 @@ import apiClient from './client'
 export type ApiKeyStatus = 'active' | 'revoked' | 'disabled' | 'expired'
 export type ResetPeriod = 'daily' | 'weekly' | 'monthly' | null
 
+/** Which agents a key may call. `all` includes agents created later. */
+export interface AgentAccess {
+  mode: 'all' | 'selected'
+  agent_ids: string[]
+}
+
 export interface ApiKeyRow {
   id: string
   workspace_id: string
@@ -22,6 +28,7 @@ export interface ApiKeyRow {
   created_by: string
   expires_at: string | null
   last_used_at: string | null
+  agent_access: AgentAccess
 }
 
 export interface ApiKeyCreated extends ApiKeyRow {
@@ -67,6 +74,8 @@ export async function createApiKey(
     credit_limit_usd?: string | null
     credit_reset_period?: ResetPeriod
     description?: string | null
+    /** Required: the caller must choose all agents or a selection. */
+    agent_access: AgentAccess
   }
 ): Promise<ApiKeyCreated> {
   const response = await apiClient.post<ApiKeyCreated>(
@@ -91,6 +100,7 @@ export async function updateApiKey(
     credit_limit_usd?: string | null
     credit_reset_period?: ResetPeriod
     description?: string | null
+    agent_access?: AgentAccess
   }
 ): Promise<ApiKeyRow> {
   const response = await apiClient.patch<ApiKeyRow>(
