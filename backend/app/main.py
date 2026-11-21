@@ -213,6 +213,7 @@ async def public_auth_error_handler(request: Request, exc: PublicAuthError):
         "key_expired": 401,
         "conversation_not_found": 404,
         "agent_unavailable": 403,
+        "agent_not_permitted": 403,
         "agent_mismatch": 409,
         "rate_limit_exceeded": 429,
         "credit_limit_exceeded": 402,

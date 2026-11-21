@@ -27,6 +27,7 @@ from app.models.chat import ChatMessage, ChatSession
 from app.models.execution import Execution
 from app.services.agent_composition import CompositionError, saved_input, validate_agent
 from app.services.agent_runtime import stream_turn
+from app.services.api_keys import allowed_agent_ids, key_allows_agent
 from app.services.public_limits import check_credit, check_rate_limit
 from app.utils.errors import NotFoundException
 
@@ -69,6 +70,13 @@ def _sse(events):
     return generate()
 
 
+def _require_agent_access(key: ApiKey, agent_id: str | None) -> None:
+    if not key_allows_agent(key, agent_id):
+        raise PublicAuthError(
+            "agent_not_permitted", "This API key is not allowed to use that agent."
+        )
+
+
 async def _resolve_conversation(
     db: AsyncSession, key: ApiKey, body: PublicChatRequest
 ) -> ChatSession:
@@ -92,6 +100,7 @@ async def _resolve_conversation(
             raise PublicAuthError(
                 "conversation_not_found", "No such conversation for this key."
             )
+        _require_agent_access(key, session.agent_id)
         if body.agent_id and body.agent_id != session.agent_id:
             raise PublicAuthError(
                 "agent_mismatch", "This conversation is with a different agent."
@@ -102,6 +111,9 @@ async def _resolve_conversation(
         raise PublicAuthError(
             "invalid_request", "agent_id is required without conversation_id."
         )
+    # Checked before the lookup so an unknown id and a forbidden one answer the
+    # same way: the key learns nothing about agents it cannot use.
+    _require_agent_access(key, body.agent_id)
     agent = (
         await db.execute(
             select(Agent).where(
@@ -245,8 +257,11 @@ async def list_callable_agents(
         .scalars()
         .all()
     )
+    allowed = allowed_agent_ids(key)
     entries = []
     for agent in agents:
+        if allowed is not None and agent.id not in allowed:
+            continue
         try:
             await validate_agent(
                 db, key.workspace_id, await saved_input(db, agent), agent_id=agent.id

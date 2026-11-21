@@ -22,6 +22,7 @@ from app.schemas.api_key import (
     ApiKeyResponse,
     ApiKeyUpdate,
     ApiKeyUsageResponse,
+    AgentAccess,
     DailySpend,
 )
 from app.services.api_keys import (
@@ -29,6 +30,7 @@ from app.services.api_keys import (
     audit,
     create_key,
     rotate_key,
+    set_agent_access,
     spend_in_window,
 )
 from app.utils.errors import NotFoundException
@@ -62,6 +64,10 @@ def _to_response(key: ApiKey) -> ApiKeyResponse:
         created_by=key.created_by,
         expires_at=key.expires_at,
         last_used_at=key.last_used_at,
+        agent_access=AgentAccess.model_construct(
+            mode="all" if key.all_agents else "selected",
+            agent_ids=[] if key.all_agents else sorted(link.agent_id for link in key.agent_links),
+        ),
     )
 
 
@@ -116,6 +122,8 @@ async def create_api_key(
         credit_limit_usd=request.credit_limit_usd,
         credit_reset_period=request.credit_reset_period,
         description=request.description,
+        all_agents=request.agent_access.mode == "all",
+        agent_ids=request.agent_access.agent_ids,
     )
     await db.commit()
     await db.refresh(key)
@@ -156,6 +164,23 @@ async def update_api_key(
         key.spend_window_started_at = datetime.now(timezone.utc)
     if request.description is not None or "description" in request.model_fields_set:
         key.description = request.description
+    if request.agent_access is not None:
+        await set_agent_access(
+            db,
+            key,
+            all_agents=request.agent_access.mode == "all",
+            agent_ids=request.agent_access.agent_ids,
+        )
+        await audit(
+            db,
+            workspace_id,
+            "access_updated",
+            key,
+            {
+                "mode": request.agent_access.mode,
+                "agent_count": len(request.agent_access.agent_ids),
+            },
+        )
     await db.commit()
     await db.refresh(key)
     return _to_response(key)

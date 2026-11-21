@@ -4,11 +4,30 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+class AgentAccess(BaseModel):
+    """Which agents a key may call: every agent, or an explicit set."""
+
+    mode: Literal["all", "selected"]
+    agent_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _normalise(self) -> "AgentAccess":
+        if self.mode == "all":
+            self.agent_ids = []
+            return self
+        # De-duplicate, keep order.
+        self.agent_ids = list(dict.fromkeys(self.agent_ids))
+        if not self.agent_ids:
+            raise ValueError("Select at least one agent, or choose all agents.")
+        return self
 
 
 class ApiKeyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    agent_access: AgentAccess  # explicit choice: no silent default
     expires_at: datetime | None = None
     credit_limit_usd: Decimal | None = Field(default=None, ge=0)
     credit_reset_period: Literal["daily", "weekly", "monthly"] | None = None
@@ -17,6 +36,7 @@ class ApiKeyCreate(BaseModel):
 
 class ApiKeyUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
+    agent_access: AgentAccess | None = None
     credit_limit_usd: Decimal | None = Field(default=None, ge=0)
     credit_reset_period: Literal["daily", "weekly", "monthly"] | None = None
     description: str | None = Field(default=None, max_length=2000)
@@ -38,6 +58,7 @@ class ApiKeyResponse(BaseModel):
     created_by: str
     expires_at: datetime | None
     last_used_at: datetime | None
+    agent_access: AgentAccess
 
 
 class ApiKeyCreatedResponse(ApiKeyResponse):

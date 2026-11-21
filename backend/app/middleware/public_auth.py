@@ -37,6 +37,7 @@ def public_error_response(code: str, message: str, status_code: int, request_id:
         "key_expired": "authentication_error",
         "conversation_not_found": "not_found_error",
         "agent_unavailable": "permission_error",
+        "agent_not_permitted": "permission_error",
         "agent_mismatch": "invalid_request_error",
         "rate_limit_exceeded": "rate_limit_error",
         "credit_limit_exceeded": "billing_error",

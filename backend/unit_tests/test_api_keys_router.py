@@ -13,7 +13,7 @@ BASE = "/api/workspaces/{ws}/api-keys"
 
 async def _make_key(client, ws_id, headers, name="Chatbot Key", **create_kwargs):
     response = await client.post(
-        BASE.format(ws=ws_id), json={"name": name, **create_kwargs}, headers=headers
+        BASE.format(ws=ws_id), json={"name": name, "agent_access": {"mode": "all"}, **create_kwargs}, headers=headers
     )
     assert response.status_code == 201, response.text
     return response.json()
