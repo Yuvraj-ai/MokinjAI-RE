@@ -1,3 +1,5 @@
+// RETIRED: replaced by ActivityLogsPage (`/logs`); `/executions` now redirects there.
+// Kept unrouted rather than deleted, per ADR-017 (mark, do not delete, while simplifying).
 import { useEffect, useState } from 'react'
 import { listExecutions } from '../api/executions'
 import { listWorkspaces } from '../api/workspaces'

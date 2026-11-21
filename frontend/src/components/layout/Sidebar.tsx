@@ -1,13 +1,14 @@
 import { useState, useRef, useCallback } from 'react'
 import { NavLink } from 'react-router-dom'
-import { GitBranch, Play, FileText, Bot, Braces, FolderOpen, Database, BookOpen, Wrench, Plug, Cpu, MessagesSquare, KeyRound } from 'lucide-react'
+import { LayoutDashboard, ScrollText, GitBranch, FileText, Bot, Braces, FolderOpen, Database, BookOpen, Wrench, Plug, Cpu, MessagesSquare, KeyRound } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 const navItems = [
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/logs', label: 'Activity Logs', icon: ScrollText },
   { to: '/agents', label: 'Agents', icon: Bot },
   { to: '/playground', label: 'Playground', icon: MessagesSquare },
   { to: '/workflows', label: 'Workflows', icon: GitBranch },
-  { to: '/executions', label: 'Executions', icon: Play },
   { to: '/prompts', label: 'System Prompts', icon: FileText },
   { to: '/structured-outputs', label: 'Structured Output', icon: Braces },
   { to: '/files', label: 'Files', icon: FolderOpen },
@@ -20,8 +21,9 @@ const navItems = [
 ]
 
 const navSections = [
-  { label: 'Build', items: navItems.slice(0, 6) },
-  { label: 'Data & tools', items: navItems.slice(6) },
+  { label: 'Monitor', items: navItems.slice(0, 2) },
+  { label: 'Build', items: navItems.slice(2, 7) },
+  { label: 'Data & tools', items: navItems.slice(7) },
 ]
 
 interface SidebarProps {

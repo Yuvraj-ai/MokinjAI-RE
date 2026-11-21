@@ -2,7 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import WorkflowEditorPage from './pages/WorkflowEditorPage'
-import ExecutionHistoryPage from './pages/ExecutionHistoryPage'
+import ActivityPage from './pages/ActivityPage'
+import ActivityLogsPage from './pages/ActivityLogsPage'
 import PromptsPage from './pages/PromptsPage'
 import LlmProfilesPage from './pages/LlmProfilesPage'
 import StructuredOutputsPage from './pages/StructuredOutputsPage'
@@ -23,14 +24,17 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-        <Route path="/" element={<Navigate to="/workflows" replace />} />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<ActivityPage />} />
+        <Route path="/logs" element={<ActivityLogsPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/playground" element={<PlaygroundPage />} />
         <Route path="/keys" element={<ApiKeysPage />} />
         <Route path="/keys/:keyId" element={<ApiKeysDetailPage />} />
         <Route path="/workflows" element={<DashboardPage />} />
         <Route path="/workflows/:workflowId/edit" element={<WorkflowEditorPage />} />
-        <Route path="/executions" element={<ExecutionHistoryPage />} />
+        {/* Execution History became Activity Logs; keep old links working. */}
+        <Route path="/executions" element={<Navigate to="/logs" replace />} />
         <Route path="/prompts" element={<PromptsPage />} />
         <Route path="/structured-outputs" element={<StructuredOutputsPage />} />
         <Route path="/files" element={<FilesPage />} />

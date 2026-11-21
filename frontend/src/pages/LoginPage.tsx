@@ -7,7 +7,7 @@ export default function LoginPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
 
   if (isAuthenticated) {
-    return <Navigate to="/workflows" replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   return (
