@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.output_formats import ALL_OUTPUT_FORMATS, DEFAULT_OUTPUT_FORMAT
+
 
 class ChatSessionCreate(BaseModel):
     agent_id: str
@@ -41,6 +43,9 @@ class ChatMessageResponse(BaseModel):
     usage: dict[str, Any] | None
     cost_usd: float | None
     execution_id: str | None
+    # How the reply was generated (and so how to render it). Rows from before
+    # the feature have none and read as Markdown.
+    output_format: str = DEFAULT_OUTPUT_FORMAT
     created_at: datetime
 
 
@@ -51,6 +56,16 @@ class ChatSessionDetailResponse(ChatSessionResponse):
 class PlaygroundChatRequest(BaseModel):
     # The same 32 000-char bound the old agents chat path enforced.
     content: str = Field(min_length=1, max_length=32_000)
+    # What the model is asked to generate for this turn. Validated against the
+    # agent's current model in the router; omitted means Markdown.
+    output_format: str = DEFAULT_OUTPUT_FORMAT
+
+    @field_validator("output_format")
+    @classmethod
+    def known_output_format(cls, value: str) -> str:
+        if value not in ALL_OUTPUT_FORMATS:
+            raise ValueError(f"output_format must be one of {', '.join(ALL_OUTPUT_FORMATS)}")
+        return value
 
     @field_validator("content")
     @classmethod

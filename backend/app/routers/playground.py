@@ -21,6 +21,7 @@ from app.middleware.rbac import require_workspace_role
 from app.models.agent import Agent
 from app.models.chat import ChatMessage, ChatSession
 from app.models.execution import Execution
+from app.models.llm_profile import LlmProfile
 from app.models.workspace import WorkspaceMember
 from app.schemas.playground import (
     ChatSessionCreate,
@@ -32,6 +33,11 @@ from app.schemas.playground import (
     PlaygroundChatRequest,
 )
 from app.services.agent_runtime import stream_turn
+from app.services.output_formats import (
+    DEFAULT_OUTPUT_FORMAT,
+    UnsupportedOutputFormat,
+    require_supported,
+)
 from app.utils.errors import BadRequestException, NotFoundException
 
 router = APIRouter()
@@ -100,12 +106,20 @@ async def chat_in_session(
     """One playground turn. The client sends only the new message — history is
     server-owned. Each turn records one Execution (trigger_type=chat)."""
     chat_session = await _load_session(db, workspace_id, session_id)
+    # The frontend greys out OpenUI for small models, but this is the check that
+    # counts: it uses the agent's current profile, not what the page last saw.
+    agent = await _load_agent(db, workspace_id, chat_session.agent_id)
+    profile = await db.get(LlmProfile, agent.llm_profile_id) if agent.llm_profile_id else None
+    try:
+        require_supported(request.output_format, profile.context_window if profile else None)
+    except UnsupportedOutputFormat as exc:
+        raise BadRequestException(str(exc))
     execution = Execution(
         workspace_id=workspace_id,
         agent_id=chat_session.agent_id,
         status="running",
         trigger_type="chat",
-        input_data={"content": request.content},
+        input_data={"content": request.content, "output_format": request.output_format},
         started_at=datetime.now(timezone.utc),
     )
     db.add(execution)
@@ -115,7 +129,11 @@ async def chat_in_session(
     return StreamingResponse(
         _sse(
             stream_turn(
-                workspace_id, chat_session.id, request.content, execution.id
+                workspace_id,
+                chat_session.id,
+                request.content,
+                execution.id,
+                output_format=request.output_format,
             )
         ),
         media_type="text/event-stream",
@@ -152,6 +170,7 @@ def _to_message_response(row: ChatMessage) -> ChatMessageResponse:
         usage=row.usage,
         cost_usd=float(row.cost_usd) if row.cost_usd is not None else None,
         execution_id=row.execution_id,
+        output_format=row.output_format or DEFAULT_OUTPUT_FORMAT,
         created_at=row.created_at,
     )
 

@@ -56,6 +56,11 @@ from app.services.agent_tools import (
     user_tool,
 )
 from app.services.connector_runtime import load_connector_tools
+from app.services.output_formats import (
+    DEFAULT_OUTPUT_FORMAT,
+    UnsupportedOutputFormat,
+    require_supported,
+)
 from app.services.sandbox import InMemoryToolSource, SandboxConfig, SandboxSession
 from app.services.sandbox.budget import release, reserve
 from app.services.storage import StorageError, get_storage
@@ -315,12 +320,13 @@ def build_graph(
     tools: list[BaseTool | dict[str, Any]],
     *,
     streaming: bool,
+    output_format: str | None = None,
 ):
     model = build_chat_model(validated.profile, validated.params, streaming=streaming)
     return create_agent(
         model,
         tools,
-        system_prompt=_system_prompt(agent.system_prompt, validated),
+        system_prompt=_system_prompt(agent.system_prompt, validated, output_format),
         response_format=(
             ToolStrategy(validated.structured_schema)
             if validated.structured_schema is not None
@@ -330,7 +336,9 @@ def build_graph(
     )
 
 
-def _system_prompt(prompt: str, validated: ValidatedAgent) -> str:
+def _system_prompt(
+    prompt: str, validated: ValidatedAgent, output_format: str | None = None
+) -> str:
     sections: list[str] = []
     menu = validated.resolved_skills.menu
     if menu:
@@ -666,6 +674,7 @@ async def stream_turn(
     session_id: str,
     content: str,
     execution_id: str,
+    output_format: str = DEFAULT_OUTPUT_FORMAT,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one playground turn (spec §6-7): persist both messages, stream the
     v2 protocol, and keep the assistant row's activity log identical to what
@@ -730,6 +739,7 @@ async def stream_turn(
                 role="assistant",
                 content="",
                 execution_id=execution_id,
+                output_format=output_format,
             )
             db.add_all([user_row, assistant_row])
             if chat_session.title == "New session":
@@ -748,6 +758,12 @@ async def stream_turn(
             validated = await validate_agent(
                 db, workspace_id, await saved_input(db, agent), agent_id=agent.id
             )
+            # Re-checked against the profile this turn actually resolved, in case
+            # it changed after the router's check.
+            require_supported(
+                output_format,
+                validated.profile.context_window if validated.profile else None,
+            )
             staging, filenames = await _stage_files(validated.attached_documents)
             sandbox, reserved_mb = _open_session(
                 workspace_id, validated, str(staging) if staging else None
@@ -755,7 +771,9 @@ async def stream_turn(
             tools = await build_tools(
                 db, workspace_id, validated, sandbox, depth=0, filenames=filenames
             )
-            graph = build_graph(validated, agent, tools, streaming=True)
+            graph = build_graph(
+                validated, agent, tools, streaming=True, output_format=output_format
+            )
             model_snapshot = (validated.profile.provider, validated.profile.model_id)
             await _bump_run_usage(db, workspace_id, validated)
             await db.commit()
@@ -944,6 +962,20 @@ async def stream_turn(
             ttft_ms=ttft_ms,
         )
         if assistant_message_id is not None and not content_parts and not reasoning_parts and not activity:
+            await _delete_assistant_message(assistant_message_id)
+        yield {"event": "error", "data": {"detail": detail}}
+
+    except UnsupportedOutputFormat as exc:
+        detail = str(exc)
+        await _mark_execution(
+            execution_id,
+            "failed",
+            error=detail,
+            started=started,
+            model=model_snapshot,
+            ttft_ms=ttft_ms,
+        )
+        if assistant_message_id is not None:
             await _delete_assistant_message(assistant_message_id)
         yield {"event": "error", "data": {"detail": detail}}
 

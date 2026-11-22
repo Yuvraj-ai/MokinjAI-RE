@@ -81,6 +81,10 @@ class ChatMessage(Base):
     execution_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("executions.id", ondelete="SET NULL"), nullable=True
     )
+    # How an assistant reply was generated ("markdown" | "openui"), which decides
+    # how it renders on replay. NULL (rows from before the feature, user rows)
+    # reads as Markdown. The reply text itself is always the raw model output.
+    output_format: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

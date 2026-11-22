@@ -484,7 +484,7 @@ class TestStreamTurn:
         graph = FakeGraphV2()
         prompts_seen: list[str] = []
 
-        def capture_build(validated, agent_row, tools, *, streaming):
+        def capture_build(validated, agent_row, tools, *, streaming, **_):
             prompts_seen.append(agent_row.system_prompt)
             return graph
 
@@ -703,7 +703,7 @@ class TestChatEndpoint:
     ):
         agent, chat_session, _ = await _setup(db_session, test_workspace)
 
-        async def fake_stream(workspace_id, session_id, content, execution_id):
+        async def fake_stream(workspace_id, session_id, content, execution_id, **_):
             yield {"event": "token", "data": {"delta": "Hi"}}
             yield {"event": "done", "data": {"usage": {}, "cost_usd": 0.0, "status": "completed"}}
 
@@ -797,3 +797,75 @@ class TestChatEndpoint:
         items = response.json() if isinstance(response.json(), list) else response.json().get("executions", [])
         assert all(item.get("workflow_id") is not None for item in items)
         assert len(items) == 1
+
+
+class TestOutputFormatTurn:
+    @staticmethod
+    async def _run(db_session, session_factory, test_workspace, monkeypatch, window, **kwargs):
+        agent, chat_session, execution = await _setup(db_session, test_workspace)
+        profile = await db_session.get(LlmProfile, agent.llm_profile_id)
+        profile.context_window = window
+        await db_session.commit()
+        seen: dict = {}
+
+        def fake_build_graph(*args, **kw):
+            seen.update(kw)
+            return FakeGraphV2()
+
+        monkeypatch.setattr("app.services.agent_runtime.async_session", session_factory)
+        monkeypatch.setattr("app.services.agent_runtime.build_graph", fake_build_graph)
+        events = [
+            event
+            async for event in stream_turn(
+                test_workspace.id, chat_session.id, "hi", execution.id, **kwargs
+            )
+        ]
+        async with session_factory() as check:
+            rows = (
+                (
+                    await check.execute(
+                        select(ChatMessage)
+                        .where(ChatMessage.session_id == chat_session.id)
+                        .order_by(ChatMessage.seq)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return events, rows, seen
+
+    @pytest.mark.asyncio
+    async def test_reply_defaults_to_markdown(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        events, rows, seen = await self._run(
+            db_session, session_factory, test_workspace, monkeypatch, 128_000
+        )
+        assert events[-1]["event"] == "done"
+        assert rows[1].output_format == "markdown"
+        assert seen["output_format"] == "markdown"
+
+    @pytest.mark.asyncio
+    async def test_openui_turn_is_recorded_and_reaches_the_graph(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        events, rows, seen = await self._run(
+            db_session, session_factory, test_workspace, monkeypatch, 200_000,
+            output_format="openui",
+        )
+        assert events[-1]["event"] == "done"
+        assert rows[1].output_format == "openui"
+        assert seen["output_format"] == "openui"
+
+    @pytest.mark.asyncio
+    async def test_openui_is_refused_when_the_profile_shrank_mid_flight(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        events, rows, seen = await self._run(
+            db_session, session_factory, test_workspace, monkeypatch, 199_999,
+            output_format="openui",
+        )
+        assert [e["event"] for e in events] == ["error"]
+        assert "200,000" in events[-1]["data"]["detail"]
+        assert seen == {}
+        assert [row.role for row in rows] == ["user"]
