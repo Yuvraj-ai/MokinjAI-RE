@@ -30,6 +30,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from sqlalchemy import select
 
 from app.crypto import decrypt_api_key
+from app.services.agent_resilience import tool_middleware
 from app.database import async_session
 from app.logging import logger
 from app.models.agent import Agent
@@ -335,6 +336,7 @@ def build_graph(
             else None
         ),
         name=_graph_name(agent),
+        middleware=tool_middleware(),
     )
 
 
