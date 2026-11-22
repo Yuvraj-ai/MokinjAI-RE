@@ -68,6 +68,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
+      # @openuidev/lang-core sends install-time telemetry unless told not to.
+      - key: OPENUI_TELEMETRY_DISABLED
+        value: "1"
       # https://api.<domain> — baked in at build time.
       - key: VITE_API_URL
         sync: false
