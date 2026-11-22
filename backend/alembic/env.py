@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
 from app.database import Base
+from app.db_url import engine_options, migration_url
 from app.models import *  # noqa: F401,F403 - register every model for autogenerate
 
 config = context.config
@@ -55,10 +56,12 @@ def assert_local_target(url: str | None) -> None:
 # The guard runs first: the URL can carry a URL-encoded '%' in a password, which
 # configparser rejects, and a refusal must read as a message rather than a
 # traceback.
-database_url = os.getenv("DATABASE_URL")
+database_url = migration_url(os.environ)
 assert_local_target(database_url)
 
+_connect_args: dict = {}
 if database_url:
+    database_url, _connect_args = engine_options(database_url)
     # configparser treats '%' as interpolation syntax, so escape it; the value
     # read back through get_section/get_main_option is unescaped again.
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
@@ -91,6 +94,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=_connect_args,
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
