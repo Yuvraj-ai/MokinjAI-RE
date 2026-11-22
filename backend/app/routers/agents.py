@@ -185,6 +185,7 @@ def _capabilities_response(profile: LlmProfile | None) -> AgentCapabilitiesRespo
             profile.provider,
             profile.model_id,
             max_output_tokens_override=profile.max_output_tokens,
+            context_window=profile.context_window,
         )
     except ValueError:
         return None

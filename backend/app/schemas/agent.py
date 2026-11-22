@@ -62,6 +62,8 @@ class AgentCapabilitiesResponse(BaseModel):
     native_web_search: bool
     structured_output: bool
     tool_calling: bool
+    context_window: int | None = None
+    output_formats: list[str] = Field(default_factory=lambda: ["markdown"])
 
 
 class ResolvedSkill(BaseModel):

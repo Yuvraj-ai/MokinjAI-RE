@@ -8,10 +8,11 @@ provider matrix. Everything here is pure; `lookup_profile` is the only function
 that touches LangChain.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.model_profiles import lookup_profile
+from app.services.output_formats import MARKDOWN, get_supported_output_formats
 
 DEFAULT_MAX_OUTPUT_TOKENS = 4096
 """Universal completion ceiling when neither the app nor LangChain knows better."""
@@ -57,9 +58,13 @@ class Capabilities:
     native_web_search: bool
     structured_output: bool
     tool_calling: bool
+    context_window: int | None = None
+    output_formats: list[str] = field(default_factory=lambda: [MARKDOWN])
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "context_window": self.context_window,
+            "output_formats": list(self.output_formats),
             "provider": self.provider,
             "model_id": self.model_id,
             "max_output_tokens": self.max_output_tokens,
@@ -91,6 +96,7 @@ def capabilities_for(
     *,
     profile: dict[str, Any] | None = None,
     max_output_tokens_override: int | None = None,
+    context_window: int | None = None,
 ) -> Capabilities:
     """Resolve the controls the UI may show for one model.
 
@@ -131,6 +137,8 @@ def capabilities_for(
         native_web_search=_NATIVE_WEB_SEARCH[provider],
         structured_output=bool(data.get("structured_output", True)),
         tool_calling=bool(data.get("tool_calling", True)),
+        context_window=context_window,
+        output_formats=get_supported_output_formats(context_window),
     )
 
 
