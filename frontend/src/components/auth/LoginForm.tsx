@@ -1,9 +1,9 @@
 import { useState, FormEvent } from 'react'
 import { useAuth } from '../../hooks/useAuth'
-import { Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react'
-import { Label } from '../ui/Field'
+import { AlertCircle, ArrowRight } from 'lucide-react'
 import Button from '../ui/Button'
 import { Callout } from '../ui/Feedback'
+import LabelInput from '../ui/LabelInput'
 
 export default function LoginForm() {
   const { login } = useAuth()
@@ -29,22 +29,19 @@ export default function LoginForm() {
     }
   }
 
-  const inputClass =
-    'w-full rounded-lg border border-line bg-surface h-10 px-9 pr-3 py-2 text-sm text-ink placeholder:text-ink-subtle focus:outline-none focus:ring-2 focus:ring-ring transition-colors'
-
   return (
-    <div className="w-full">
-      <div className="mb-7">
-        <h2 className="text-xl font-semibold text-ink tracking-tight animate-fade-in-up">
-          Welcome back
+    <div className="w-full max-w-[340px] mx-auto">
+      <div className="mb-6">
+        <h2 className="text-2xl font-semibold text-ink tracking-tight animate-fade-in-up">
+          Sign into your account
         </h2>
         <p className="mt-1 text-sm text-ink-muted animate-fade-in-up stagger-1">
-          Sign in to continue to your workspace
+          Enter your credentials to access your workspace
         </p>
       </div>
 
       {error && (
-        <div className="mb-6 animate-fade-in">
+        <div className="mb-5 animate-fade-in">
           <Callout tone="danger">
             <span className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden />
@@ -54,47 +51,35 @@ export default function LoginForm() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <form onSubmit={handleSubmit} className="space-y-4">
         <div className="animate-fade-in-up stagger-2">
-          <Label htmlFor="email" required>
-            Email
-          </Label>
-          <div className="relative">
-            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-subtle pointer-events-none" aria-hidden />
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              placeholder="you@example.com"
-              className={inputClass}
-            />
-          </div>
+          <LabelInput
+            field="Email"
+            id="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+            corner={12}
+          />
         </div>
 
         <div className="animate-fade-in-up stagger-3">
-          <Label htmlFor="password" required>
-            Password
-          </Label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-subtle pointer-events-none" aria-hidden />
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              placeholder="Enter your password"
-              className={inputClass}
-            />
-          </div>
+          <LabelInput
+            field="Password"
+            id="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+            corner={12}
+          />
         </div>
 
         <div className="pt-2 animate-fade-in-up stagger-4">
-          <Button type="submit" loading={loading} className="group w-full h-10 px-4 py-2">
+          <Button type="submit" loading={loading} className="group w-full h-10 px-4 py-2 rounded-xl text-sm font-medium">
             {loading ? (
-              'Signing in'
+              'Signing in…'
             ) : (
               <>
                 Sign in
@@ -104,20 +89,6 @@ export default function LoginForm() {
           </Button>
         </div>
       </form>
-
-      <p className="mt-8 text-center text-xs text-ink-subtle animate-fade-in-up stagger-5">
-        Don&apos;t have an account?{' '}
-        <a
-          href={`mailto:yuvrajsingh.tech@protonmail.com?subject=${encodeURIComponent(
-            '[Mokinjay] Account Access Request'
-          )}&body=${encodeURIComponent(
-            'Hello Admin,\n\nI would like to request an account to access the Mokinjay workspace.\n\nDetails:\n- Full Name: \n- Requested Email: \n- Organization / Team: \n- Reason / Use Case: \n\nThank you!'
-          )}`}
-          className="text-ink-muted hover:text-ink underline underline-offset-2 transition-colors"
-        >
-          Contact an admin
-        </a>
-      </p>
     </div>
   )
 }
