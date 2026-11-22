@@ -91,3 +91,4 @@ backboard_frontend/
 api_key_sections/
 # Uploaded files (local storage backend)
 backend/storage/
+.neon
