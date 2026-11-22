@@ -24,8 +24,17 @@ Built and verified in a browser against a scratch database: dashboard as home, e
 
 Not built: Trends and Explore tabs, Guardrails, live mode, export, reasoning tokens shown unless a model reports them.
 
+## Playground output formats (Markdown and OpenUI)
+
+Built and verified in a browser against a scratch database with a stub OpenAI-compatible model. Replies render as GitHub-flavoured Markdown for every model. OpenUI (thesysdev OpenUI Lang, React renderer) is offered when the agent's LLM profile has a stored context window of at least 200,000 tokens (model-card value for known models, user-typed for custom ones). The choice is per turn, held in page state; the reply's format is stored on `chat_messages.output_format` (NULL reads as Markdown). That column comes from a migration NOT applied to the hosted database. The public `/v1` API is unchanged and always Markdown.
+
+Not verified against real providers yet: how reliably each model writes valid OpenUI.
+
 ## Known gaps (open)
 
+- Superusers cannot create Playground sessions: `require_workspace_role` returns a bare `WorkspaceMember` for them, and `create_session` reads `member.user_id` (500).
+- The public `/v1` buffered response concatenates text from every model step, including narration before a tool call; the persisted message keeps only the final step.
+- The OpenUI packages declare `zustand@^4` as a peer; a package.json override runs them on the app's zustand 5. Re-check after upgrading them.
 - Test suite is not fully green: a small number of `@tool` decorator tests in `test_builtin_tools.py` fail (reproduce when the file runs alone).
 - Legacy canvas: `knowledge` node exists in UI only (not in backend `ModuleRegistry`); canvas offers Gemini but the engine Agent node supports only OpenAI and Anthropic (returns an explicit unsupported-provider error).
 - Execution WebSocket manager has no publishers; `useWebSocket` is defined but never mounted. Runs are synchronous; the Celery path is unused.

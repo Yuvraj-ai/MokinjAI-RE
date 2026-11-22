@@ -8,6 +8,8 @@ Mokinjay is an **AI agent platform as a service**. Users build customized AI age
 
 **The agent is the product.** The resource library feeds agent construction. API exposure is the delivery mechanism. The Playground chat exists to test agents. The visual workflow canvas is **legacy**, kept working but not the product.
 
+Playground replies render as Markdown. Agents whose model has a context window of 200,000 tokens or more can also be asked for OpenUI (generated, interactive UI from a fixed component library) per message. Markdown is always the default. The 200,000 threshold is a product rule enforced on the server.
+
 Flow: build agent -> expose endpoint -> external app calls it with an API key.
 
 ## Resource library (per workspace)

@@ -8,7 +8,7 @@ inclusion: always
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 19, TypeScript, Vite, Zustand, TanStack Query, React Router 7, Tailwind CSS 3, React Flow (`@xyflow/react`, legacy canvas), CodeMirror 6 (tool editor), Axios |
+| Frontend | React 19, TypeScript, Vite, Zustand, TanStack Query, React Router 7, Tailwind CSS 3, React Flow (`@xyflow/react`, legacy canvas), CodeMirror 6 (tool editor), Axios, react-markdown + remark-gfm + rehype-highlight (replies), OpenUI (`@openuidev/react-lang`, `@openuidev/react-ui`, lazy-loaded), Vitest |
 | Backend | Python 3.12+, FastAPI, SQLAlchemy 2 (async, asyncpg), Pydantic v2, Alembic |
 | Database | PostgreSQL only (JSONB, tz-aware timestamps). SQLite is retired. |
 | LLM layer | LangChain 1.x, LangGraph, `langchain-openai/anthropic/google-genai`, `langchain-mcp-adapters`, `langchain-exa`, `langchain-tavily` |
@@ -40,6 +40,9 @@ backend/venv/bin/python backend/seed.py --generate-password
 cd frontend && npm run dev      # dev server on 5173
 cd frontend && npm run build    # tsc -b && vite build
 cd frontend && npm run lint
+cd frontend && npm test         # Vitest + Testing Library (jsdom)
+cd frontend && npm run openui:prompt   # regenerate backend/app/services/openui_prompt.txt after changing the OpenUI library or packages
+# Install with OPENUI_TELEMETRY_DISABLED=1 (or DO_NOT_TRACK=1): @openuidev/lang-core sends install telemetry otherwise.
 
 # Everything at once
 ./run_mokinjay.sh

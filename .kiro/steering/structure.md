@@ -31,6 +31,7 @@ backend/
     connector_catalog / connector_runtime      web_search         model_profiles / llm_probe
     api_keys (incl. agent access) / public_limits   sessions / otp_store / telegram / seed
     activity (dashboard + logs aggregations over executions)
+    output_formats (Markdown/OpenUI eligibility, threshold, committed openui_prompt.txt)
     sandbox/       kernel.py (stdlib-only), protocol, backends (Docker, Subprocess, Instabox), session, budget, daemon/
     data_sources/  guard (sqlglot), mongo_guard, postgres, mysql, mongo, ssrf, schema_cache
     storage/       base, filesystem, s3
@@ -48,7 +49,9 @@ frontend/src/
                      Prompts, StructuredOutputs, Files, DataSources, Skills, LlmProfiles, Tools, Connectors, Login
   components/        agents/ (config dialog, pickers), flow/ (legacy canvas), execution/, auth/, layout/, dashboard/
   store/             Zustand (auth, workflow, execution, theme)
-  lib/               activityFilters (URL-held filter state), chartColors, format, agentAccess
+  lib/               activityFilters (URL-held filter state), chartColors, format, agentAccess, outputFormat
+  components/playground/  ThreadPane, AgentResponseRenderer (Markdown | lazy OpenUI, Raw/Rendered), MarkdownRenderer,
+                     OutputFormatSelector, RenderBoundary, openui/ (library, inspect, renderer, prompt drift test)
   hooks/ types/
 
 docker/              Dockerfile.backend, Dockerfile.frontend, Dockerfile.sandbox

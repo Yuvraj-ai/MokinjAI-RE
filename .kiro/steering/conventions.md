@@ -26,6 +26,8 @@ inclusion: always
 
 ## Security patterns in force
 
+- Model output is untrusted. Markdown renders without raw HTML, with unsafe link schemes blanked and remote images replaced by a label. OpenUI renders only the trimmed component library, gets no `toolProvider`, and forwards only follow-up messages and user-confirmed http(s) links. A CSP meta tag limits `img-src` to self, data: and blob:. Every renderer sits behind an error boundary and keeps the raw reply.
+- OpenUI eligibility (context window >= 200,000) is enforced in the chat router and again in the runtime. The frontend only reads `capabilities.output_formats`.
 - Secrets (LLM keys, connector auth, external DB URIs) are Fernet-encrypted at rest via `app/crypto.py`. API responses expose only `has_api_key`-style booleans. A blank key on retest keeps the existing ciphertext.
 - Public API keys are SHA-256 hashed; plaintext is shown once.
 - Sessions are server-side; logout revokes immediately over HTTP and WebSocket. The execution WebSocket checks workspace membership.
