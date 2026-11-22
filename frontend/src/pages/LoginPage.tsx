@@ -15,17 +15,17 @@ export default function LoginPage() {
       {/* Left: brand panel framed in a window with small, clean borders */}
       <div className="hidden lg:flex lg:w-1/2 p-3 sm:p-4 lg:p-5">
         <div className="w-full h-full relative bg-[#262334] border border-line/40 dark:border-white/10 rounded-3xl flex flex-col justify-end p-8 xl:p-12 overflow-hidden shadow-sm">
-          {/* Mokinjay Dither Illustration fitting nicely without giant borders */}
+          {/* Mokinjay Dither Illustration zoomed in to take full space of the frame */}
           <div className="absolute inset-0 flex items-center justify-center select-none pointer-events-none">
             <img
               src="/ditther-1794604960622.png"
               alt="Mokinjay Illustration"
-              className="w-full h-full object-contain"
+              className="w-full h-full object-cover object-center"
               style={{
                 maskImage:
-                  'linear-gradient(to right, transparent 0%, black 2%, black 98%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 2%, black 98%, transparent 100%)',
+                  'linear-gradient(to right, transparent 0%, black 1%, black 99%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 1%, black 99%, transparent 100%)',
                 WebkitMaskImage:
-                  'linear-gradient(to right, transparent 0%, black 2%, black 98%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 2%, black 98%, transparent 100%)',
+                  'linear-gradient(to right, transparent 0%, black 1%, black 99%, transparent 100%), linear-gradient(to bottom, transparent 0%, black 1%, black 99%, transparent 100%)',
                 maskComposite: 'intersect',
                 WebkitMaskComposite: 'destination-in',
               }}
