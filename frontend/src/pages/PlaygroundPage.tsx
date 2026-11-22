@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { listAgents, type AgentListItem } from '../api/agents'
+import {
+  getAgent,
+  listAgents,
+  type AgentCapabilities,
+  type AgentListItem,
+  type OutputFormat,
+} from '../api/agents'
+import { availableFormats, DEFAULT_OUTPUT_FORMAT, reconcileFormat } from '../lib/outputFormat'
 import { listWorkspaces } from '../api/workspaces'
 import {
   createSession,
@@ -25,6 +32,8 @@ export default function PlaygroundPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [capabilities, setCapabilities] = useState<AgentCapabilities | null>(null)
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>(DEFAULT_OUTPUT_FORMAT)
 
   const agentId = searchParams.get('agent')
   const sessionId = searchParams.get('session')
@@ -73,6 +82,32 @@ export default function PlaygroundPage() {
     if (workspaceId && agentId) refreshSessions(agentId)
   }, [workspaceId, agentId, refreshSessions])
 
+  // Eligibility follows the agent's current model. Re-read on every agent
+  // switch; while loading (or on failure) only Markdown is offered.
+  useEffect(() => {
+    if (!workspaceId || !agentId) return
+    let cancelled = false
+    getAgent(workspaceId, agentId)
+      .then((agent) => {
+        if (!cancelled) setCapabilities(agent.capabilities)
+      })
+      .catch(() => {
+        if (!cancelled) setCapabilities(null)
+      })
+    return () => {
+      cancelled = true
+      setCapabilities(null)
+    }
+  }, [workspaceId, agentId])
+
+  // A model without OpenUI resets the choice to Markdown for good, so going
+  // back to an eligible model does not silently re-enable OpenUI.
+  useEffect(() => {
+    if (capabilities && !availableFormats(capabilities).includes(outputFormat)) {
+      setOutputFormat(DEFAULT_OUTPUT_FORMAT)
+    }
+  }, [capabilities, outputFormat])
+
   useEffect(() => {
     if (!workspaceId || !sessionId) {
       setMessages([])
@@ -87,6 +122,8 @@ export default function PlaygroundPage() {
 
   const selectedAgent = agents.find((agent) => agent.id === agentId) ?? null
   const activeSession = sessions.find((session) => session.id === sessionId) ?? null
+  const formats = availableFormats(capabilities)
+  const effectiveFormat = reconcileFormat(outputFormat, formats)
 
   const handleTurnEnded = useCallback(async () => {
     const jobs: Promise<void>[] = []
@@ -182,6 +219,10 @@ export default function PlaygroundPage() {
           session={activeSession}
           messages={messages}
           readOnly={readOnly}
+          outputFormat={effectiveFormat}
+          availableFormats={formats}
+          capabilities={capabilities}
+          onOutputFormatChange={setOutputFormat}
           onTurnEnded={handleTurnEnded}
         />
       </div>

@@ -30,7 +30,13 @@ export interface AgentCapabilities {
   native_web_search: boolean
   structured_output: boolean
   tool_calling: boolean
+  /** The LLM profile's stored context window; null when unknown. */
+  context_window?: number | null
+  /** Reply formats this model may be asked for, Markdown first. Server-decided. */
+  output_formats?: OutputFormat[]
 }
+
+export type OutputFormat = 'markdown' | 'openui'
 
 export interface AgentOption {
   id: string

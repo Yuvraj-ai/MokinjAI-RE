@@ -1,5 +1,6 @@
 import apiClient from './client'
 import { handleAuthFailure, refreshAccessToken } from './authSession'
+import type { OutputFormat } from './agents'
 
 /**
  * Playground chat: server-owned sessions. The client sends only the new
@@ -40,6 +41,8 @@ export interface PlaygroundMessage {
   usage: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | null
   cost_usd: number | null
   execution_id: string | null
+  /** How the reply was generated; older rows come back as 'markdown'. */
+  output_format?: OutputFormat
   created_at: string
 }
 
@@ -51,6 +54,7 @@ export interface PlaygroundSessionDetail {
 export type PlaygroundEvent =
   | { type: 'message'; user_message_id: string; assistant_message_id: string }
   | { type: 'token'; delta: string }
+  | { type: 'content_reset' }
   | { type: 'reasoning'; delta: string }
   | { type: 'activity'; payload: ActivityEvent }
   | { type: 'done'; usage: PlaygroundMessage['usage']; cost_usd: number; status: string }
@@ -108,6 +112,7 @@ function openStream(
   workspaceId: string,
   sessionId: string,
   content: string,
+  outputFormat: OutputFormat,
   signal?: AbortSignal
 ): Promise<Response> {
   const base = import.meta.env.VITE_API_URL || ''
@@ -120,7 +125,7 @@ function openStream(
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, output_format: outputFormat }),
       signal,
     }
   )
@@ -152,12 +157,13 @@ export async function* streamSessionChat(
   workspaceId: string,
   sessionId: string,
   content: string,
+  outputFormat: OutputFormat = 'markdown',
   signal?: AbortSignal
 ): AsyncGenerator<PlaygroundEvent> {
-  let response = await openStream(workspaceId, sessionId, content, signal)
+  let response = await openStream(workspaceId, sessionId, content, outputFormat, signal)
   if (response.status === 401) {
     if (await refreshAccessToken()) {
-      response = await openStream(workspaceId, sessionId, content, signal)
+      response = await openStream(workspaceId, sessionId, content, outputFormat, signal)
     }
   }
   if (response.status === 401) {
@@ -196,6 +202,7 @@ export async function* streamSessionChat(
           assistant_message_id: String(d.assistant_message_id),
         }
       else if (event.event === 'token') yield { type: 'token', delta: String(d.delta ?? '') }
+      else if (event.event === 'content_reset') yield { type: 'content_reset' }
       else if (event.event === 'reasoning')
         yield { type: 'reasoning', delta: String(d.delta ?? '') }
       else if (event.event === 'activity')

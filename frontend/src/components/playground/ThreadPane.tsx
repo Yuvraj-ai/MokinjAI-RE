@@ -1,5 +1,6 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Bot, Send, Square, StopCircle, User, CircleAlert } from 'lucide-react'
+import type { AgentCapabilities, OutputFormat } from '../../api/agents'
 import {
   streamSessionChat,
   type ActivityEvent,
@@ -7,7 +8,8 @@ import {
   type PlaygroundSession,
 } from '../../api/playground'
 import ActivityCard from './ActivityCard'
-import MarkdownRenderer from './MarkdownRenderer'
+import AgentResponseRenderer from './AgentResponseRenderer'
+import OutputFormatSelector from './OutputFormatSelector'
 import ThinkingCard from './ThinkingCard'
 
 interface ThreadPaneProps {
@@ -15,6 +17,11 @@ interface ThreadPaneProps {
   session: PlaygroundSession | null
   messages: PlaygroundMessage[]
   readOnly: boolean
+  /** What the next message asks the model to generate. */
+  outputFormat: OutputFormat
+  availableFormats: OutputFormat[]
+  capabilities: AgentCapabilities | null
+  onOutputFormatChange: (format: OutputFormat) => void
   onTurnEnded: () => void
 }
 
@@ -26,6 +33,7 @@ interface RenderedAssistant {
   status: 'completed' | 'stopped' | 'failed'
   usage: PlaygroundMessage['usage']
   cost_usd: number | null
+  format: OutputFormat
 }
 
 function fromPersisted(message: PlaygroundMessage): RenderedAssistant {
@@ -36,6 +44,7 @@ function fromPersisted(message: PlaygroundMessage): RenderedAssistant {
     status: message.status ?? 'completed',
     usage: message.usage,
     cost_usd: message.cost_usd,
+    format: message.output_format ?? 'markdown',
   }
 }
 
@@ -56,9 +65,11 @@ function collapseEvents(events: ActivityEvent[]): ActivityEvent[] {
 const AssistantTurn = memo(function AssistantTurn({
   turn,
   streaming,
+  onFollowUp,
 }: {
   turn: RenderedAssistant
   streaming: boolean
+  onFollowUp?: (message: string) => void
 }) {
   const events = collapseEvents(turn.events)
   return (
@@ -68,7 +79,12 @@ const AssistantTurn = memo(function AssistantTurn({
         <ActivityCard key={`${event.type}-${event.id ?? index}`} event={event} />
       ))}
       {turn.content ? (
-        <MarkdownRenderer content={turn.content} streaming={streaming} />
+        <AgentResponseRenderer
+          format={turn.format}
+          content={turn.content}
+          streaming={streaming}
+          onFollowUp={onFollowUp}
+        />
       ) : streaming ? (
         <p className="px-1 py-1 text-[13px] text-ink-subtle">…</p>
       ) : null}
@@ -95,10 +111,16 @@ const AssistantTurn = memo(function AssistantTurn({
 /**
  * A persisted turn never changes while a new one streams, so it is memoised on
  * the stable message row. Without this, every token re-rendered the entire
- * history, including every activity card.
+ * history, including every activity card. `onFollowUp` must be stable too.
  */
-const PersistedTurn = memo(function PersistedTurn({ message }: { message: PlaygroundMessage }) {
-  return <AssistantTurn turn={fromPersisted(message)} streaming={false} />
+const PersistedTurn = memo(function PersistedTurn({
+  message,
+  onFollowUp,
+}: {
+  message: PlaygroundMessage
+  onFollowUp?: (message: string) => void
+}) {
+  return <AssistantTurn turn={fromPersisted(message)} streaming={false} onFollowUp={onFollowUp} />
 })
 
 export default function ThreadPane({
@@ -106,6 +128,10 @@ export default function ThreadPane({
   session,
   messages,
   readOnly,
+  outputFormat,
+  availableFormats,
+  capabilities,
+  onOutputFormatChange,
   onTurnEnded,
 }: ThreadPaneProps) {
   const [input, setInput] = useState('')
@@ -136,14 +162,22 @@ export default function ThreadPane({
     setSending(false)
   }, [session?.id])
 
-  const send = async () => {
-    const content = input.trim()
-    if (!content || !workspaceId || !session || sending) return
+  const send = async (followUp?: string) => {
+    const content = (followUp ?? input).trim()
+    if (!content || !workspaceId || !session || sending || readOnly) return
 
     setSending(true)
     setError(null)
-    setInflight({ content: '', reasoning: '', events: [], status: 'completed', usage: null, cost_usd: null })
-    setInput('')
+    setInflight({
+      content: '',
+      reasoning: '',
+      events: [],
+      status: 'completed',
+      usage: null,
+      cost_usd: null,
+      format: outputFormat,
+    })
+    if (followUp === undefined) setInput('')
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -182,11 +216,17 @@ export default function ThreadPane({
         workspaceId,
         session.id,
         content,
+        outputFormat,
         controller.signal
       )) {
         if (event.type === 'token') {
           pendingContent += event.delta
           scheduleFlush()
+        } else if (event.type === 'content_reset') {
+          // Text before a tool call was narration; the saved reply is only
+          // the final step, so the live bubble drops it too.
+          pendingContent = ''
+          setInflight((current) => (current ? { ...current, content: '' } : current))
         } else if (event.type === 'reasoning') {
           pendingReasoning += event.delta
           scheduleFlush()
@@ -221,6 +261,15 @@ export default function ThreadPane({
   }
 
   const stop = () => abortRef.current?.abort()
+
+  // Follow-ups come from buttons inside generated UI. The callback is stable so
+  // memoised history rows do not re-render on every keystroke or token.
+  const sendRef = useRef(send)
+  useEffect(() => {
+    sendRef.current = send
+  })
+  const followUp = useCallback((message: string) => void sendRef.current(message), [])
+  const canFollowUp = !readOnly && !!session
 
   const totalCost = messages.reduce(
     (sum, message) => sum + (message.cost_usd ?? 0),
@@ -257,7 +306,7 @@ export default function ThreadPane({
           ) : (
             <div key={message.id} className="flex justify-start gap-2">
               <Bot className="mt-1 h-4 w-4 shrink-0 text-ink-subtle" aria-hidden />
-              <PersistedTurn message={message} />
+              <PersistedTurn message={message} onFollowUp={canFollowUp ? followUp : undefined} />
             </div>
           )
         )}
@@ -313,6 +362,15 @@ export default function ThreadPane({
               <Send className="h-3 w-3" aria-hidden /> Send
             </button>
           )}
+        </div>
+        <div className="mt-2">
+          <OutputFormatSelector
+            value={outputFormat}
+            available={availableFormats}
+            capabilities={capabilities}
+            disabled={sending || readOnly}
+            onChange={onOutputFormatChange}
+          />
         </div>
       </footer>
     </div>
