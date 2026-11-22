@@ -32,7 +32,6 @@ Not verified against real providers yet: how reliably each model writes valid Op
 
 ## Known gaps (open)
 
-- Superusers cannot create Playground sessions: `require_workspace_role` returns a bare `WorkspaceMember` for them, and `create_session` reads `member.user_id` (500).
 - The public `/v1` buffered response concatenates text from every model step, including narration before a tool call; the persisted message keeps only the final step.
 - The OpenUI packages declare `zustand@^4` as a peer; a package.json override runs them on the app's zustand 5. Re-check after upgrading them.
 - Test suite is not fully green: a small number of `@tool` decorator tests in `test_builtin_tools.py` fail (reproduce when the file runs alone).
