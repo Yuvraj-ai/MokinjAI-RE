@@ -119,6 +119,70 @@ def test_a_partial_credential_set_falls_back_to_the_filesystem(monkeypatch, tmp_
     monkeypatch.setattr(settings, "STORAGE_S3_BUCKET", "mokinjay-test")
     monkeypatch.setattr(settings, "STORAGE_S3_ACCESS_KEY_ID", "")
     monkeypatch.setattr(settings, "STORAGE_S3_SECRET_ACCESS_KEY", "")
+    monkeypatch.setattr(settings, "AWS_ACCESS_KEY_ID", "")
+    monkeypatch.setattr(settings, "AWS_SECRET_ACCESS_KEY", "")
     monkeypatch.setattr(settings, "STORAGE_LOCAL_PATH", str(tmp_path))
 
     assert isinstance(get_storage(), FilesystemStorage)
+
+
+def _clear_storage_settings(monkeypatch, settings, tmp_path):
+    for name in (
+        "STORAGE_S3_BUCKET", "STORAGE_S3_ENDPOINT_URL", "STORAGE_S3_ACCESS_KEY_ID",
+        "STORAGE_S3_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_ENDPOINT_URL_S3", "AWS_REGION",
+    ):
+        monkeypatch.setattr(settings, name, "")
+    monkeypatch.setattr(settings, "STORAGE_LOCAL_PATH", str(tmp_path))
+
+
+def test_neon_aws_variables_fill_in_missing_storage_settings(monkeypatch, tmp_path):
+    """`neon env pull` writes AWS-standard names; a bucket name selects them."""
+    settings = get_settings()
+    _clear_storage_settings(monkeypatch, settings, tmp_path)
+    monkeypatch.setattr(settings, "STORAGE_S3_BUCKET", "assets")
+    monkeypatch.setattr(settings, "AWS_ACCESS_KEY_ID", "neon-key")
+    monkeypatch.setattr(settings, "AWS_SECRET_ACCESS_KEY", "neon-secret")
+    monkeypatch.setattr(settings, "AWS_ENDPOINT_URL_S3", "https://br-x.storage.c-9.us-east-2.aws.neon.tech")
+    monkeypatch.setattr(settings, "AWS_REGION", "us-east-2")
+
+    storage = get_storage()
+
+    assert isinstance(storage, S3Storage)
+    assert storage.bucket == "assets"
+    assert storage._client.meta.endpoint_url == "https://br-x.storage.c-9.us-east-2.aws.neon.tech"
+    assert storage._client.meta.region_name == "us-east-2"
+
+
+def test_explicit_storage_settings_win_over_aws_variables(monkeypatch, tmp_path):
+    settings = get_settings()
+    _clear_storage_settings(monkeypatch, settings, tmp_path)
+    monkeypatch.setattr(settings, "STORAGE_S3_BUCKET", "b2-bucket")
+    monkeypatch.setattr(settings, "STORAGE_S3_ENDPOINT_URL", "https://s3.us-west-004.backblazeb2.com")
+    monkeypatch.setattr(settings, "STORAGE_S3_ACCESS_KEY_ID", "b2-key")
+    monkeypatch.setattr(settings, "STORAGE_S3_SECRET_ACCESS_KEY", "b2-secret")
+    monkeypatch.setattr(settings, "AWS_ENDPOINT_URL_S3", "https://neon.example")
+    monkeypatch.setattr(settings, "AWS_ACCESS_KEY_ID", "neon-key")
+    monkeypatch.setattr(settings, "AWS_SECRET_ACCESS_KEY", "neon-secret")
+
+    storage = get_storage()
+
+    assert storage._client.meta.endpoint_url == "https://s3.us-west-004.backblazeb2.com"
+
+
+def test_aws_keys_without_a_bucket_name_stay_on_the_filesystem(monkeypatch, tmp_path):
+    settings = get_settings()
+    _clear_storage_settings(monkeypatch, settings, tmp_path)
+    monkeypatch.setattr(settings, "AWS_ACCESS_KEY_ID", "neon-key")
+    monkeypatch.setattr(settings, "AWS_SECRET_ACCESS_KEY", "neon-secret")
+
+    assert isinstance(get_storage(), FilesystemStorage)
+
+
+def test_the_s3_client_uses_path_style_addressing():
+    """Neon Object Storage requires path-style; B2 and MinIO accept it too."""
+    storage = S3Storage(
+        bucket="assets", endpoint_url="https://neon.example", region="us-east-2",
+        access_key_id="k", secret_access_key="s",
+    )
+    assert storage._client.meta.config.s3["addressing_style"] == "path"

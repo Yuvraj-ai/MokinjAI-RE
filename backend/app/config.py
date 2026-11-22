@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     STORAGE_S3_REGION: str = "us-east-1"
     STORAGE_S3_ACCESS_KEY_ID: str = ""
     STORAGE_S3_SECRET_ACCESS_KEY: str = ""
+    # Neon Object Storage (`neon env pull`) writes the AWS-standard names. They
+    # fill in any STORAGE_S3_* value left empty; STORAGE_S3_BUCKET still picks
+    # the bucket, so these alone never switch storage on.
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_ENDPOINT_URL_S3: str = ""
+    AWS_REGION: str = ""
 
     # Upload ceiling, enforced while reading the body (Task 5). A handler limit, not a
     # transport limit: see the spec's section 3.

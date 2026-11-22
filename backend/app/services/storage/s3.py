@@ -3,6 +3,7 @@
 import asyncio
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 from app.services.storage.base import ObjectNotFoundError, StorageError
@@ -36,6 +37,9 @@ class S3Storage:
             region_name=region or None,
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
+            # Neon Object Storage only serves path-style requests; Backblaze B2
+            # and MinIO accept them as well.
+            config=BotoConfig(s3={"addressing_style": "path"}),
         )
 
     async def upload_file(self, key: str, data: bytes, *, content_type: str) -> None:
