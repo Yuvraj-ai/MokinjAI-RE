@@ -20,6 +20,7 @@ import {
   type KeyLogRow,
 } from '../api/apiKeys'
 import { PlaintextModal, StatusChip } from './ApiKeysPage'
+import { StatusBadge } from '../components/ui/Badge'
 import { cn } from '../lib/utils'
 
 function BudgetRing({ spend, limit }: { spend: number; limit: number | null }) {
@@ -334,13 +335,7 @@ export default function ApiKeysDetailPage() {
                     {new Date(log.created_at).toLocaleString()}
                   </td>
                   <td className="px-6 py-2.5 text-[12.5px]">
-                    <span
-                      className={cn(
-                        log.status === 'completed' ? 'text-status-success' : 'text-status-error'
-                      )}
-                    >
-                      {log.status}
-                    </span>
+                    <StatusBadge status={log.status} size="sm" />
                   </td>
                   <td className="px-6 py-2.5 text-[12.5px] text-ink-muted">—</td>
                   <td className="px-6 py-2.5 text-[12.5px] text-ink-muted">

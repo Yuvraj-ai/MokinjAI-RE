@@ -14,7 +14,7 @@ import {
 import FilterBar from '../components/activity/FilterBar'
 import { StackedBars } from '../components/activity/charts'
 import type { ChartSeries } from '../lib/chartColors'
-import Badge, { type BadgeTone } from '../components/ui/Badge'
+import Badge, { StatusBadge, type BadgeTone } from '../components/ui/Badge'
 import { EmptyState, Spinner } from '../components/ui/Feedback'
 import { Table, TableFrame, Td, Th, Tr } from '../components/ui/Table'
 import { Tabs } from '../components/ui/Tabs'
@@ -135,11 +135,7 @@ function DetailDrawer({
               <div className="grid grid-cols-2 gap-4">
                 <Field
                   label="Status"
-                  value={
-                    <Badge tone={STATUS_TONE[detail.status] ?? 'neutral'} dot>
-                      {detail.status}
-                    </Badge>
-                  }
+                  value={<StatusBadge status={detail.status} />}
                 />
                 <Field label="When" value={new Date(detail.created_at).toLocaleString()} />
                 <Field label="Agent" value={detail.agent_name ?? '—'} />
@@ -414,9 +410,7 @@ export default function ActivityLogsPage() {
                         </span>
                       </Td>
                       <Td>
-                        <Badge tone={STATUS_TONE[row.status] ?? 'neutral'} dot>
-                          {row.status}
-                        </Badge>
+                        <StatusBadge status={row.status} />
                       </Td>
                       <Td numeric className="text-ink-muted">
                         {row.input_tokens != null ? compact(row.input_tokens) : '—'}

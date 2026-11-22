@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { Clock, MessagesSquare, Settings2, Trash2 } from 'lucide-react'
-import Badge from '../ui/Badge'
+import Badge, { StatusBadge } from '../ui/Badge'
 import { cn } from '../../lib/utils'
 import type { AgentListItem } from '../../api/agents'
 
@@ -76,14 +76,9 @@ export default function AgentCard({
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Badge
-          tone={agent.status === 'ready' ? 'success' : 'warning'}
-          dot
-        >
-          {agent.status === 'ready' ? 'Ready' : 'Needs attention'}
-        </Badge>
+        <StatusBadge status={agent.status} />
         {llmProfileName && (
-          <span className="truncate max-w-[200px] rounded-md border border-line bg-surface-muted px-2 py-0.5 font-mono text-[11px] text-ink-muted">
+          <span className="truncate max-w-[200px] rounded-[7px] border border-line bg-surface-muted px-2 py-0.5 font-mono text-[11px] text-ink-muted">
             {llmProfileName}
           </span>
         )}

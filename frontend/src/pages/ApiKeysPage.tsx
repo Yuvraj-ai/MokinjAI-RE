@@ -11,6 +11,7 @@ import {
   createApiKey,
 } from '../api/apiKeys'
 import AgentAccessPicker from '../components/apikeys/AgentAccessPicker'
+import { StatusBadge } from '../components/ui/Badge'
 import { accessIsValid, accessLabel } from '../lib/agentAccess'
 import { cn } from '../lib/utils'
 
@@ -29,17 +30,7 @@ const RESET_OPTIONS = [
 ]
 
 export function StatusChip({ status }: { status: ApiKeyRow['status'] }) {
-  const styles: Record<ApiKeyRow['status'], string> = {
-    active: 'bg-status-success-soft text-status-success',
-    disabled: 'bg-surface-muted text-ink-muted',
-    expired: 'bg-surface-muted text-ink-subtle line-through',
-    revoked: 'bg-status-error-soft text-status-error',
-  }
-  return (
-    <span className={cn('rounded-full px-2 py-0.5 text-[10.5px] font-medium', styles[status])}>
-      {status[0].toUpperCase() + status.slice(1)}
-    </span>
-  )
+  return <StatusBadge status={status} size="sm" />
 }
 
 function relative(iso: string | null): string {

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Search, X } from 'lucide-react'
 import type { AgentListItem } from '../../api/agents'
 import type { AgentAccess } from '../../api/apiKeys'
+import { StatusBadge } from '../ui/Badge'
 import { cn } from '../../lib/utils'
 
 /**
@@ -165,7 +166,7 @@ export default function AgentAccessPicker({
                   />
                   <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{agent.name}</span>
                   {agent.status === 'needs_attention' && (
-                    <span className="text-[11px] text-status-warning">needs attention</span>
+                    <StatusBadge status="needs_attention" size="sm" />
                   )}
                 </label>
               </li>

@@ -14,6 +14,7 @@ import {
 import Button from '../components/ui/Button'
 import { Input, Label, Select } from '../components/ui/Field'
 import { Callout, Spinner } from '../components/ui/Feedback'
+import { StatusBadge } from '../components/ui/Badge'
 
 type CheckState = { status: 'checking' } | { status: 'ok'; tables: number } | { status: 'failed'; message: string }
 
@@ -28,20 +29,19 @@ const emptyConnection = {
 function CheckBadge({ state }: { state: CheckState | undefined }) {
   if (!state) return <span className="ml-2 font-mono text-[11px] text-ink-subtle">not verified</span>
   if (state.status === 'checking') {
-    return <span className="ml-2 text-xs text-ink-muted">checking…</span>
+    return <StatusBadge status="checking" label="checking…" size="sm" className="ml-2" />
   }
   if (state.status === 'ok') {
     return (
-      <span className="ml-2 inline-flex rounded-full bg-status-success-soft px-2 py-0.5 text-[11px] font-medium text-status-success">
-        connected · {state.tables} table{state.tables === 1 ? '' : 's'}
-      </span>
+      <StatusBadge
+        status="ok"
+        label={`connected · ${state.tables} table${state.tables === 1 ? '' : 's'}`}
+        size="sm"
+        className="ml-2"
+      />
     )
   }
-  return (
-    <span className="ml-2 inline-flex rounded-full bg-status-error-soft px-2 py-0.5 text-[11px] font-medium text-status-error">
-      {state.message}
-    </span>
-  )
+  return <StatusBadge status="failed" label={state.message} size="sm" className="ml-2" />
 }
 
 export default function DataSourcesPage() {

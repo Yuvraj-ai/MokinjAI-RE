@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteWorkflow, updateWorkflow } from '../../api/workflows'
 import { Trash2, Clock, MoreVertical, Pencil, Check, X } from 'lucide-react'
-import Badge, { type BadgeTone } from '../ui/Badge'
+import Badge, { StatusBadge, type BadgeTone } from '../ui/Badge'
 import Menu, { MenuItem } from '../ui/Menu'
 import { cn } from '../../lib/utils'
 
@@ -150,9 +150,7 @@ export default function WorkflowCard({ workflow, workspaceId, onDeleted, onRenam
 
       {workflow.status && (
         <div className="mb-4">
-          <Badge tone={statusTone(workflow.status)} dot>
-            {workflow.status}
-          </Badge>
+          <StatusBadge status={workflow.status} />
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown, Search } from 'lucide-react'
 import type { AgentOption } from '../../api/agents'
+import { StatusBadge } from '../ui/Badge'
 import { cn } from '../../lib/utils'
 
 interface LlmPickerProps {
@@ -59,16 +60,10 @@ export default function LlmPicker({ options, value, onChange }: LlmPickerProps) 
             {option.provider}/{option.model_id}
           </span>
         </span>
-        <span
-          className={cn(
-            'shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide',
-            option.status === 'verified'
-              ? 'bg-status-success-soft text-status-success'
-              : 'bg-status-warning-soft text-status-warning',
-          )}
-        >
-          {option.status ?? 'ready'}
-        </span>
+        <StatusBadge
+          status={option.status ?? 'ready'}
+          size="sm"
+        />
       </button>
     </li>
   )

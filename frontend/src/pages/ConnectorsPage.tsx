@@ -14,7 +14,7 @@ import {
 import Button from '../components/ui/Button'
 import { Input, Label, Select } from '../components/ui/Field'
 import { Spinner, EmptyState } from '../components/ui/Feedback'
-import Badge from '../components/ui/Badge'
+import Badge, { StatusBadge } from '../components/ui/Badge'
 import { cn } from '../lib/utils'
 
 function axiosDetail(error: unknown): string | null {
@@ -296,9 +296,7 @@ export default function ConnectorsPage() {
                   </div>
                 </button>
                 <div className="flex items-center gap-2">
-                  <Badge tone={statusTones[connector.status] ?? 'warning'}>
-                    {connector.status}
-                  </Badge>
+                  <StatusBadge status={connector.status} size="sm" />
                   <button
                     onClick={() => void handleTest(connector)}
                     disabled={busyId === connector.id}

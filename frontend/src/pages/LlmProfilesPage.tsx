@@ -11,7 +11,7 @@ import {
 } from '../api/llmProfiles'
 import Button from '../components/ui/Button'
 import { Spinner, EmptyState } from '../components/ui/Feedback'
-import Badge from '../components/ui/Badge'
+import Badge, { StatusBadge } from '../components/ui/Badge'
 
 const PROVIDERS: { value: LlmProvider; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
@@ -371,12 +371,7 @@ export default function LlmProfilesPage() {
                   </div>
                 </button>
                 <div className="flex items-center gap-2">
-                  <Badge
-                    variant="outline"
-                    tone={profile.usable ? 'success' : 'danger'}
-                  >
-                    {profile.status}
-                  </Badge>
+                  <StatusBadge status={profile.status} size="sm" />
                   <button onClick={() => void handleDelete(profile.id)} title="Remove" aria-label={`Remove ${profile.name}`}
                     className="rounded-md p-1.5 text-ink-subtle transition-colors hover:bg-status-error-soft hover:text-status-error">
                     <Trash2 className="w-4 h-4" />

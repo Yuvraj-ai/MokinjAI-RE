@@ -7,7 +7,7 @@ import { useExecutionStore } from '../store/executionStore'
 import { CheckCircle, XCircle, Clock, Loader2, History } from 'lucide-react'
 import type { Execution } from '../types/execution'
 import { EmptyState, Spinner } from '../components/ui/Feedback'
-import Badge from '../components/ui/Badge'
+import Badge, { StatusBadge } from '../components/ui/Badge'
 import { TableFrame, Table, Th, Td, Tr } from '../components/ui/Table'
 
 const statusIcons: Record<string, React.ReactNode> = {
@@ -95,12 +95,7 @@ export default function ExecutionHistoryPage() {
                   className={`animate-fade-in stagger-${Math.min(i + 1, 8)}`}
                 >
                   <Td>
-                    <span className="inline-flex items-center gap-1.5">
-                      {statusIcons[exec.status]}
-                      <Badge tone={statusTones[exec.status] ?? 'neutral'} dot>
-                        {exec.status}
-                      </Badge>
-                    </span>
+                    <StatusBadge status={exec.status} size="sm" />
                   </Td>
                   <Td mono className="text-ink-muted">
                     {exec.id.slice(0, 8)}…
