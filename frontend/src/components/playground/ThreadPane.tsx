@@ -7,6 +7,7 @@ import {
   type PlaygroundSession,
 } from '../../api/playground'
 import ActivityCard from './ActivityCard'
+import MarkdownRenderer from './MarkdownRenderer'
 import ThinkingCard from './ThinkingCard'
 
 interface ThreadPaneProps {
@@ -61,13 +62,13 @@ const AssistantTurn = memo(function AssistantTurn({
 }) {
   const events = collapseEvents(turn.events)
   return (
-    <div className="flex max-w-[85%] flex-col">
+    <div className="flex min-w-0 max-w-[85%] flex-col">
       {turn.reasoning && <ThinkingCard reasoning={turn.reasoning} live={streaming && !turn.content} />}
       {events.map((event, index) => (
         <ActivityCard key={`${event.type}-${event.id ?? index}`} event={event} />
       ))}
       {turn.content ? (
-        <p className="whitespace-pre-wrap px-1 py-1 text-[13px] text-ink">{turn.content}</p>
+        <MarkdownRenderer content={turn.content} streaming={streaming} />
       ) : streaming ? (
         <p className="px-1 py-1 text-[13px] text-ink-subtle">…</p>
       ) : null}
