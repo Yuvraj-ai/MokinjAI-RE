@@ -482,7 +482,11 @@ async def _load_source_prompt(
 
 
 async def attachment_rows(db: AsyncSession, agent_id: str) -> list[tuple[Document, str | None]]:
-    """The agent's files and the folder each was attached through, for the response."""
+    """The agent's files and the folder each was attached through, for the response.
+
+    UNUSED: agent responses now load attachments for many agents in one query
+    (`routers/agents.py::_load_read_context`). Marked for later removal.
+    """
     rows = await db.execute(
         select(Document, AgentDocument.source_folder_id)
         .join(AgentDocument, AgentDocument.document_id == Document.id)

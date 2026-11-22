@@ -1,7 +1,8 @@
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, literal, or_, select, union_all
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +21,7 @@ from app.models.agent import (
 )
 from app.models.connector import ConnectorInstance
 from app.models.execution import Execution
-from app.models.knowledge import FileFolder
+from app.models.knowledge import Document, FileFolder
 from app.models.llm_profile import LlmProfile
 from app.models.resource_usage import ResourceUsage, bump_usage
 from app.models.search_credential import SearchCredential
@@ -45,7 +46,6 @@ from app.schemas.agent import (
 )
 from app.services.agent_capabilities import capabilities_for
 from app.services.agent_composition import (
-    attachment_rows,
     AgentInput,
     DataSourceRule,
     FolderRule,
@@ -116,6 +116,7 @@ async def _load_agent(db: AsyncSession, workspace_id: str, agent_id: str) -> Age
 
 
 async def _join_ids(db: AsyncSession, agent_id: str) -> dict[str, list[str]]:
+    # UNUSED: responses read joins through `_load_read_context`. Marked for later removal.
     return await join_ids(db, agent_id)
 
 
@@ -192,22 +193,188 @@ def _capabilities_response(profile: LlmProfile | None) -> AgentCapabilitiesRespo
     return AgentCapabilitiesResponse(**capabilities.as_dict())
 
 
+@dataclass
+class _ReadContext:
+    """Everything the agent responses read, loaded once for a batch of agents.
+
+    Each field is one query (or none when no agent needs it), so building the
+    list costs the same number of round trips for one agent or a hundred.
+    """
+
+    profiles: dict[str, LlmProfile]
+    skills: list[Skill]
+    tools: list[Tool]
+    outputs: dict[str, StructuredOutput]
+    search_providers: set[str]
+    joins: dict[str, dict[str, list[str]]]
+    connectors: dict[str, ConnectorInstance]
+    data_sources: dict[str, list[AgentDataSource]]
+    connection_names: dict[str, str]
+    attachments: dict[str, list[tuple[Document, str | None]]]
+    # Tool code is parsed once per request, not once per agent that uses it.
+    schema_errors: dict[str, str | None] = field(default_factory=dict)
+
+    def schema_error(self, tool: Tool) -> str | None:
+        if tool.id not in self.schema_errors:
+            extracted = extract_schema(tool.code)
+            self.schema_errors[tool.id] = (
+                None if extracted.schema is not None else extraction_error(tool.name, extracted)
+            )
+        return self.schema_errors[tool.id]
+
+
+_JOIN_TABLES = (
+    ("skill_ids", AgentSkill, AgentSkill.skill_id),
+    ("tool_ids", AgentTool, AgentTool.tool_id),
+    ("documents", AgentDocument, AgentDocument.document_id),
+    ("connector_ids", AgentConnector, AgentConnector.connector_instance_id),
+    ("subagent_ids", AgentSubagent, AgentSubagent.subagent_id),
+)
+
+
+async def _load_read_context(
+    db: AsyncSession, workspace_id: str, agents: list[Agent]
+) -> _ReadContext:
+    agent_ids = [agent.id for agent in agents]
+
+    async def rows(statement) -> list:
+        return list((await db.execute(statement)).scalars().all())
+
+    profile_ids = {agent.llm_profile_id for agent in agents if agent.llm_profile_id}
+    profiles = (
+        {row.id: row for row in await rows(select(LlmProfile).where(LlmProfile.id.in_(profile_ids)))}
+        if profile_ids
+        else {}
+    )
+    skills = await rows(select(Skill).where(Skill.workspace_id == workspace_id))
+    tools = await rows(select(Tool).where(Tool.workspace_id == workspace_id))
+
+    output_ids = {agent.structured_output_id for agent in agents if agent.structured_output_id}
+    outputs = (
+        {
+            row.id: row
+            for row in await rows(
+                select(StructuredOutput).where(
+                    or_(
+                        StructuredOutput.workspace_id == workspace_id,
+                        StructuredOutput.id.in_(output_ids),
+                    )
+                )
+            )
+        }
+        if output_ids
+        else {}
+    )
+
+    wants_search = any(
+        agent.web_search and agent.web_search.get("method") in ("tavily", "exa") for agent in agents
+    )
+    search_providers = (
+        set(
+            await rows(
+                select(SearchCredential.provider).where(
+                    SearchCredential.workspace_id == workspace_id
+                )
+            )
+        )
+        if wants_search
+        else set()
+    )
+
+    joins = {
+        agent_id: {name: [] for name, _, _ in _JOIN_TABLES} for agent_id in agent_ids
+    }
+    if agent_ids:
+        statement = union_all(
+            *(
+                select(
+                    literal(name).label("kind"),
+                    model.agent_id.label("agent_id"),
+                    column.label("ref"),
+                ).where(model.agent_id.in_(agent_ids))
+                for name, model, column in _JOIN_TABLES
+            )
+        )
+        for kind, agent_id, ref in (await db.execute(statement)).all():
+            joins[agent_id][kind].append(ref)
+
+    connector_ids = {ref for ids in joins.values() for ref in ids["connector_ids"]}
+    connectors = (
+        {
+            row.id: row
+            for row in await rows(
+                select(ConnectorInstance).where(
+                    ConnectorInstance.id.in_(connector_ids),
+                    ConnectorInstance.workspace_id == workspace_id,
+                )
+            )
+        }
+        if connector_ids
+        else {}
+    )
+
+    data_sources: dict[str, list[AgentDataSource]] = {agent_id: [] for agent_id in agent_ids}
+    if agent_ids:
+        for row in await rows(
+            select(AgentDataSource).where(AgentDataSource.agent_id.in_(agent_ids))
+        ):
+            data_sources[row.agent_id].append(row)
+    connection_names = (
+        {
+            row.id: row.name
+            for row in await rows(
+                select(ExternalDatabaseConnection).where(
+                    ExternalDatabaseConnection.workspace_id == workspace_id
+                )
+            )
+        }
+        if any(data_sources.values())
+        else {}
+    )
+
+    attachments: dict[str, list[tuple[Document, str | None]]] = {
+        agent_id: [] for agent_id in agent_ids
+    }
+    if agent_ids:
+        result = await db.execute(
+            select(Document, AgentDocument.source_folder_id, AgentDocument.agent_id)
+            .join(AgentDocument, AgentDocument.document_id == Document.id)
+            .where(AgentDocument.agent_id.in_(agent_ids))
+            .order_by(AgentDocument.created_at, AgentDocument.document_id)
+        )
+        for document, source_folder_id, agent_id in result.all():
+            attachments[agent_id].append((document, source_folder_id))
+
+    return _ReadContext(
+        profiles=profiles,
+        skills=skills,
+        tools=tools,
+        outputs=outputs,
+        search_providers=search_providers,
+        joins=joins,
+        connectors=connectors,
+        data_sources=data_sources,
+        connection_names=connection_names,
+        attachments=attachments,
+    )
+
+
 async def _to_response(
     db: AsyncSession, agent: Agent, *, join_ids: dict[str, list[str]] | None = None
 ) -> AgentResponse:
-    ids = join_ids or await _join_ids(db, agent.id)
-    profile = (
-        await db.get(LlmProfile, agent.llm_profile_id) if agent.llm_profile_id else None
-    )
+    context = await _load_read_context(db, agent.workspace_id, [agent])
+    if join_ids is not None:
+        context.joins[agent.id] = join_ids
+    return _build_response(agent, context)
+
+
+def _build_response(agent: Agent, context: _ReadContext) -> AgentResponse:
+    """The agent's response and readiness, from already-loaded data (no queries)."""
+    ids = context.joins[agent.id]
+    profile = context.profiles.get(agent.llm_profile_id) if agent.llm_profile_id else None
     capabilities = _capabilities_response(profile)
 
-    all_skills = list(
-        (
-            await db.execute(select(Skill).where(Skill.workspace_id == agent.workspace_id))
-        )
-        .scalars()
-        .all()
-    )
+    all_skills = context.skills
     selected_skills = [row for row in all_skills if row.id in ids["skill_ids"]]
     selected_names = {row.name for row in selected_skills}
 
@@ -238,21 +405,10 @@ async def _to_response(
             issues.extend(f"{error.field}: {error.message}" for error in exc.errors)
 
     if agent.structured_output_id:
-        output = await db.get(StructuredOutput, agent.structured_output_id)
+        output = context.outputs.get(agent.structured_output_id)
         if output is None:
             issues.append("The selected structured output was deleted.")
         else:
-            outputs = list(
-                (
-                    await db.execute(
-                        select(StructuredOutput).where(
-                            StructuredOutput.workspace_id == agent.workspace_id
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
             try:
                 compile_schema(
                     Definition(
@@ -266,7 +422,8 @@ async def _to_response(
                             description=row.description,
                             fields=list(row.fields or []),
                         )
-                        for row in outputs
+                        for row in context.outputs.values()
+                        if row.workspace_id == agent.workspace_id
                     },
                 )
             except StructuredOutputError as exc:
@@ -274,38 +431,15 @@ async def _to_response(
 
     if agent.web_search and agent.web_search.get("method") in ("tavily", "exa"):
         method = agent.web_search["method"]
-        credential = (
-            await db.execute(
-                select(SearchCredential).where(
-                    SearchCredential.workspace_id == agent.workspace_id,
-                    SearchCredential.provider == method,
-                )
-            )
-        ).scalar_one_or_none()
-        if credential is None:
+        if method not in context.search_providers:
             issues.append(f"Add an API key for {method}.")
 
-    connectors = list(
-        (
-            await db.execute(
-                select(ConnectorInstance).where(
-                    ConnectorInstance.id.in_(ids["connector_ids"]),
-                    ConnectorInstance.workspace_id == agent.workspace_id,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    ) if ids["connector_ids"] else []
-    for connector in connectors:
-        if connector.status != "enabled":
+    for connector_id in ids["connector_ids"]:
+        connector = context.connectors.get(connector_id)
+        if connector is not None and connector.status != "enabled":
             issues.append(f"Connector {connector.name} is {connector.status}.")
 
-    all_tools = list(
-        (await db.execute(select(Tool).where(Tool.workspace_id == agent.workspace_id)))
-        .scalars()
-        .all()
-    )
+    all_tools = context.tools
     direct_tools = [row for row in all_tools if row.id in ids["tool_ids"]]
     workspace_tools = {row.name.lower(): row for row in all_tools}
     required = {name.lower() for name in (resolved_skills.tool_names if resolved_skills else ())}
@@ -317,9 +451,9 @@ async def _to_response(
         row = workspace_tools.get(name.lower())
         if row is None:
             continue
-        extracted = extract_schema(row.code)
-        if extracted.schema is None:
-            issues.append(extraction_error(row.name, extracted))
+        error = context.schema_error(row)
+        if error is not None:
+            issues.append(error)
 
     resolved = ResolvedDependencies(
         skills=[
@@ -348,31 +482,7 @@ async def _to_response(
         ],
     )
 
-    data_source_rows = (
-        (
-            await db.execute(
-                select(AgentDataSource).where(AgentDataSource.agent_id == agent.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    connection_names = (
-        {
-            row.id: row.name
-            for row in (
-                await db.execute(
-                    select(ExternalDatabaseConnection).where(
-                        ExternalDatabaseConnection.workspace_id == agent.workspace_id
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        }
-        if data_source_rows
-        else {}
-    )
+    data_source_rows = context.data_sources[agent.id]
 
     return AgentResponse(
         id=agent.id,
@@ -394,12 +504,12 @@ async def _to_response(
                 folder_id=document.folder_id,
                 source_folder_id=source_folder_id,
             )
-            for document, source_folder_id in await attachment_rows(db, agent.id)
+            for document, source_folder_id in context.attachments[agent.id]
         ],
         data_sources=[
             AgentDataSourceItem(
                 id=row.connection_id,
-                name=connection_names.get(row.connection_id, row.connection_id),
+                name=context.connection_names.get(row.connection_id, row.connection_id),
                 tables=list(row.tables or []),
             )
             for row in data_source_rows
@@ -557,12 +667,13 @@ async def list_agents(
         )
     ).scalars().all()
 
-    # shortcut: the badge asks `_to_response` so it can never disagree with the
-    # detail view, at the cost of one pass of queries per agent. Paginate or move
-    # the checks into one query if a workspace ever holds hundreds of agents.
+    # The badge comes from `_build_response`, the same checks as the detail
+    # view, so the two can never disagree. All data is loaded once for the
+    # whole list, so the query count does not grow with the number of agents.
+    context = await _load_read_context(db, workspace_id, list(rows))
     items = []
     for agent in rows:
-        status = (await _to_response(db, agent)).status
+        status = _build_response(agent, context).status
         items.append(
             AgentListItem(
                 id=agent.id,
