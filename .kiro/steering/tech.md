@@ -52,7 +52,9 @@ Generate secrets with `scripts/generate_jwt_secret.py` and `scripts/generate_fer
 
 ## Configuration
 
-Settings load from the **repo-root `.env`** by absolute path (both the app and Alembic), so the working directory never changes which DB is used. `.env.example` is the template. Key variables: `DATABASE_URL`, `TEST_DATABASE_URL`, `REDIS_URL`, `JWT_SECRET_KEY`, `LLM_ENCRYPTION_KEY`, `FRONTEND_URL`, `SANDBOX_*`, `STORAGE_S3_*`, `STORAGE_MAX_UPLOAD_BYTES`, `MS_CLIENT_*` (OneDrive), `TELEGRAM_*`, `PUBLIC_API_RATE_LIMIT_PER_MINUTE`.
+Settings load from the **repo-root `.env`** by absolute path (both the app and Alembic), so the working directory never changes which DB is used. `.env.example` is the template. Key variables: `DATABASE_URL`, `DATABASE_URL_UNPOOLED` (Alembic's direct URL when it is `DATABASE_URL`'s twin), `TEST_DATABASE_URL`, `REDIS_URL`, `JWT_SECRET_KEY`, `LLM_ENCRYPTION_KEY`, `FRONTEND_URL`, `SANDBOX_*`, `STORAGE_S3_*` (empty values fall back to Neon's `AWS_*`), `STORAGE_MAX_UPLOAD_BYTES`, `MS_CLIENT_*` (OneDrive), `TELEGRAM_*`, `PUBLIC_API_RATE_LIMIT_PER_MINUTE`.
+
+Database URLs may be libpq-style (`postgresql://...?sslmode=require`), as `neon env pull` writes them; `app/db_url.py` converts them to asyncpg and disables prepared-statement caching on a `-pooler` host. Neon services are declared in `neon.ts` (`neon deploy`, which rewrites `.env`: back it up first).
 
 `LLM_ENCRYPTION_KEY` must be a valid Fernet key. Rotating it makes every stored key undecryptable.
 

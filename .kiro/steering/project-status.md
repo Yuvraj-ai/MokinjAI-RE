@@ -49,3 +49,5 @@ No pending decisions. Do not re-propose the voided specs. Do not invent API-expo
 ## Deployment summary
 
 Frontend: Render static site. API: Render free web service (sleeps when idle, kept warm by a health ping). Database: Supabase Postgres via session pooler (asyncpg; the transaction pooler breaks prepared statements). Uploads: Backblaze B2 via S3 settings. Sandbox: a daemon on an InstaBox VM reusing `DockerBackend` and `kernel.py`, reached by `InstaboxBackend` over HTTP with HMAC signing. Render's start command runs migrations on boot with `ALLOW_REMOTE_MIGRATIONS=1`. No secrets belong in the repo; they live in Render, local `.env`, and the VM env file. See `deployment.md` at the repo root and `backend/deploy/`.
+
+Neon: a Neon project (`neon.ts`: Postgres, an `assets` Object Storage bucket, a starter `hello` function) is wired for local use. The Render deployment is unchanged and still uses Supabase. The Neon project's region is US East (Ohio), not Singapore, so it is far from the Render backend.
