@@ -134,6 +134,7 @@ async def chat_in_session(
                 request.content,
                 execution.id,
                 output_format=request.output_format,
+                emit_content_reset=True,
             )
         ),
         media_type="text/event-stream",

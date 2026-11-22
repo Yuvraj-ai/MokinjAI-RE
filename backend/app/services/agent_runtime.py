@@ -675,6 +675,8 @@ async def stream_turn(
     content: str,
     execution_id: str,
     output_format: str = DEFAULT_OUTPUT_FORMAT,
+    *,
+    emit_content_reset: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one playground turn (spec §6-7): persist both messages, stream the
     v2 protocol, and keep the assistant row's activity log identical to what
@@ -831,6 +833,13 @@ async def stream_turn(
                     _add_usage(usage, output.usage_metadata)
 
             elif kind == "on_tool_start" and not nested:
+                if emit_content_reset and content_parts:
+                    # Text streamed before a tool call is narration, not the
+                    # reply: only the final model step is persisted. Telling
+                    # the client to drop it keeps the live bubble identical to
+                    # the saved one (an OpenUI program must not start with prose).
+                    content_parts.clear()
+                    yield {"event": "content_reset", "data": {}}
                 run_id = str(event.get("run_id") or event.get("name", ""))
                 tool_started[run_id] = time.monotonic()
                 name = event.get("name", "")

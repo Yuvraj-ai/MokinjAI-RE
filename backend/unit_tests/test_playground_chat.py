@@ -869,3 +869,55 @@ class TestOutputFormatTurn:
         assert "200,000" in events[-1]["data"]["detail"]
         assert seen == {}
         assert [row.role for row in rows] == ["user"]
+
+
+class NarratingGraph:
+    """The model says something, calls a tool, then gives the real answer."""
+
+    async def astream_events(self, payload, version):
+        meta = {"langgraph_checkpoint_ns": "model:1"}
+        yield {"event": "on_chat_model_stream", "metadata": meta,
+               "data": {"chunk": AIMessageChunk(content="Let me check.")}}
+        yield {"event": "on_tool_start", "run_id": "r1", "name": "lookup", "metadata": {},
+               "data": {"input": {}}}
+        yield {"event": "on_tool_end", "run_id": "r1", "name": "lookup", "metadata": {},
+               "data": {"output": "42"}}
+        yield {"event": "on_chat_model_stream", "metadata": meta,
+               "data": {"chunk": AIMessageChunk(content="The answer is 42.")}}
+        yield {"event": "on_chain_end", "name": "LangGraph", "parent_ids": [], "metadata": {},
+               "data": {"output": {"messages": [AIMessage(content="The answer is 42.")]}}}
+
+
+class TestContentReset:
+    @pytest.mark.asyncio
+    async def test_playground_resets_live_text_when_a_tool_starts(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        agent, chat_session, execution = await _setup(db_session, test_workspace)
+        _install(monkeypatch, session_factory, NarratingGraph())
+        events = [
+            event
+            async for event in stream_turn(
+                test_workspace.id, chat_session.id, "hi", execution.id,
+                emit_content_reset=True,
+            )
+        ]
+        kinds = [e["event"] for e in events]
+        assert kinds.index("content_reset") < kinds.index("activity")
+        after = kinds[kinds.index("content_reset"):]
+        live = [e["data"]["delta"] for e in events[len(kinds) - len(after):] if e["event"] == "token"]
+        assert "".join(live) == "The answer is 42."
+
+    @pytest.mark.asyncio
+    async def test_no_reset_event_by_default(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        agent, chat_session, execution = await _setup(db_session, test_workspace)
+        _install(monkeypatch, session_factory, NarratingGraph())
+        events = [
+            event
+            async for event in stream_turn(
+                test_workspace.id, chat_session.id, "hi", execution.id
+            )
+        ]
+        assert "content_reset" not in [e["event"] for e in events]
