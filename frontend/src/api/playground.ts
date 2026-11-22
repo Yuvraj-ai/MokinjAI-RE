@@ -147,6 +147,28 @@ function parseEvent(block: string): RawSseEvent | null {
 }
 
 /**
+ * Split complete SSE blocks off the front of `buffer`.
+ *
+ * Returns the parsed events and the unfinished tail to keep for the next
+ * chunk. Comment blocks (the backend's ": ping" keep-alive) and malformed
+ * blocks are skipped. Every pass consumes one block, so the loop always ends:
+ * the earlier inline loop skipped a non-event block without finding the next
+ * boundary, which spun forever on the first ping and froze the tab.
+ */
+export function drainSseBuffer(buffer: string): { events: RawSseEvent[]; rest: string } {
+  const events: RawSseEvent[] = []
+  let rest = buffer
+  let boundary = rest.indexOf('\n\n')
+  while (boundary !== -1) {
+    const event = parseEvent(rest.slice(0, boundary))
+    rest = rest.slice(boundary + 2)
+    if (event) events.push(event)
+    boundary = rest.indexOf('\n\n')
+  }
+  return { events, rest }
+}
+
+/**
  * SSE over `fetch` — Axios cannot read a stream. The body carries only the
  * new message content; the backend owns the history. A 401 gets one shared
  * refresh attempt and a stream retry; a dead session signs out exactly once.
@@ -189,11 +211,9 @@ export async function* streamSessionChat(
     const { done, value } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
-    let boundary = buffer.indexOf('\n\n')
-    while (boundary !== -1) {
-      const event = parseEvent(buffer.slice(0, boundary))
-      buffer = buffer.slice(boundary + 2)
-      if (!event) continue
+    const drained = drainSseBuffer(buffer)
+    buffer = drained.rest
+    for (const event of drained.events) {
       const d = event.data
       if (event.event === 'message')
         yield {
@@ -216,7 +236,6 @@ export async function* streamSessionChat(
         }
       else if (event.event === 'error')
         yield { type: 'error', detail: String(d.detail ?? 'The turn failed.') }
-      boundary = buffer.indexOf('\n\n')
     }
   }
 }
