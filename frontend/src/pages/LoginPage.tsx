@@ -11,55 +11,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-canvas flex items-center justify-center p-3 sm:p-5 lg:p-8">
-      {/* Centered card window matching the reference layout */}
-      <div className="w-full max-w-5xl bg-surface border border-line rounded-3xl shadow-2xl p-2 sm:p-2.5 flex flex-col lg:flex-row overflow-hidden min-h-[580px] lg:min-h-[620px]">
-        {/* Left: Compact Login form (taking ~42% of space) */}
-        <div className="w-full lg:w-[42%] flex flex-col justify-between p-6 sm:p-8 lg:p-10">
-          {/* Top Brand Logo */}
-          <div className="flex items-center gap-2.5 mb-6 lg:mb-0">
-            <div className="w-8 h-8 rounded-lg bg-primary text-primary-fg flex items-center justify-center shadow-sm">
-              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
-                <path d="M12 2L7 8h3v6h4V8h3l-5-6z" />
-              </svg>
-            </div>
-            <span className="text-sm font-semibold text-ink tracking-tight">Mokinjay</span>
-          </div>
-
-          {/* Form */}
-          <div className="my-auto py-3">
-            <LoginForm />
-            <AdminOTPLogin />
-          </div>
-
-          {/* Bottom subtle access request matching reference layout */}
-          <p className="mt-6 text-center text-xs text-ink-subtle">
-            Don&apos;t have an account?{' '}
-            <a
-              href={`mailto:yuvrajsingh.tech@protonmail.com?subject=${encodeURIComponent(
-                '[Mokinjay] Account Access Request'
-              )}&body=${encodeURIComponent(
-                'Hello Admin,\n\nI would like to request an account to access the Mokinjay workspace.\n\nDetails:\n- Full Name: \n- Requested Email: \n- Organization / Team: \n- Reason / Use Case: \n\nThank you!'
-              )}`}
-              className="text-ink-muted hover:text-ink underline underline-offset-2 transition-colors"
-            >
-              Contact an admin
-            </a>
-          </p>
-        </div>
-
-        {/* Right: Picture window with slim border (taking ~58% of space) */}
-        <div className="hidden lg:flex lg:w-[58%] relative rounded-2xl overflow-hidden bg-[#262334] border border-white/10 flex-col justify-between p-8 xl:p-10 min-h-[560px]">
-          {/* Top Headline inside picture window */}
-          <div className="relative z-10 text-center pt-2">
-            <p className="text-[#A8A49C] text-xs font-mono tracking-[0.25em] uppercase mb-2 animate-fade-in">
-              Intelligent Automation
-            </p>
-            <h2 className="text-2xl xl:text-3xl font-semibold text-white tracking-tight leading-snug animate-fade-in-up stagger-1">
-              Build, orchestrate, and deploy AI agents.
-            </h2>
-          </div>
-
+    <div className="min-h-screen bg-canvas flex flex-col lg:flex-row">
+      {/* Left: brand panel framed in a window with small, clean borders */}
+      <div className="hidden lg:flex lg:w-1/2 p-3 sm:p-4 lg:p-5">
+        <div className="w-full h-full relative bg-[#262334] border border-line/40 dark:border-white/10 rounded-3xl flex flex-col justify-end p-8 xl:p-12 overflow-hidden shadow-sm">
           {/* Mokinjay Dither Illustration fitting nicely without giant borders */}
           <div className="absolute inset-0 flex items-center justify-center select-none pointer-events-none">
             <img
@@ -77,15 +32,47 @@ export default function LoginPage() {
             />
           </div>
 
-          {/* Bottom Footer inside picture window */}
-          <div className="relative z-10 flex items-center justify-between pt-2">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white/90 text-xs font-mono shadow-sm">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>v1.0 Ready</span>
+          {/* Text moved to bottom left */}
+          <div className="relative z-10 flex flex-col justify-end pt-2">
+            <p className="text-[#A8A49C] text-xs font-mono tracking-[0.25em] uppercase mb-3 animate-fade-in">
+              Intelligent Automation
+            </p>
+            <h1 className="text-4xl xl:text-5xl font-semibold text-[#FFFFFF] leading-[1.05] tracking-tight mb-4 animate-fade-in-up stagger-1">
+              Mokinjay
+            </h1>
+            <div className="h-px w-20 bg-[#FFFFFF]/20 mb-4 animate-fade-in-up stagger-2" />
+            <p className="text-[#FFFFFF]/70 text-sm xl:text-base max-w-md leading-relaxed mb-6 animate-fade-in-up stagger-3">
+              Build, orchestrate, and deploy AI agents with surgical precision.
+              A workspace designed for builders who value clarity.
+            </p>
+            <div className="flex items-center gap-3 animate-fade-in-up stagger-4">
+              <span className="font-mono text-xs uppercase tracking-widest text-[#FFFFFF]/50">
+                Agent Builder
+              </span>
             </div>
-            <span className="text-xs text-white/60">
-              Mokinjay Studio
-            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Right: Login form */}
+      <div className="flex-1 flex items-center justify-center px-6 py-12 lg:px-16">
+        <div className="w-full max-w-md animate-fade-in">
+          {/* Mobile-only brand */}
+          <div className="lg:hidden mb-10 text-center">
+            <div className="mx-auto mb-4 w-10 h-10 bg-[#141414] rounded-lg flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-5 h-5 text-[#FFFFFF]" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" aria-hidden="true">
+                <path d="M12 2L7 8h3v6h4V8h3l-5-6z" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-semibold text-ink tracking-tight">Mokinjay</h1>
+            <p className="mt-1 font-mono text-[11px] uppercase tracking-widest text-ink-subtle">
+              Agent Builder
+            </p>
+          </div>
+
+          <div className="bg-surface border border-line rounded-2xl px-8 py-9">
+            <LoginForm />
+            <AdminOTPLogin />
           </div>
         </div>
       </div>

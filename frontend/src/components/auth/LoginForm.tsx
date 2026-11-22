@@ -30,18 +30,18 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="w-full max-w-[340px] mx-auto">
-      <div className="mb-6">
-        <h2 className="text-2xl font-semibold text-ink tracking-tight animate-fade-in-up">
-          Sign into your account
+    <div className="w-full">
+      <div className="mb-7">
+        <h2 className="text-xl font-semibold text-ink tracking-tight animate-fade-in-up">
+          Welcome back
         </h2>
         <p className="mt-1 text-sm text-ink-muted animate-fade-in-up stagger-1">
-          Enter your credentials to access your workspace
+          Sign in to continue to your workspace
         </p>
       </div>
 
       {error && (
-        <div className="mb-5 animate-fade-in">
+        <div className="mb-6 animate-fade-in">
           <Callout tone="danger">
             <span className="flex items-start gap-2">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden />
@@ -89,6 +89,20 @@ export default function LoginForm() {
           </Button>
         </div>
       </form>
+
+      <p className="mt-8 text-center text-xs text-ink-subtle animate-fade-in-up stagger-5">
+        Don&apos;t have an account?{' '}
+        <a
+          href={`mailto:yuvrajsingh.tech@protonmail.com?subject=${encodeURIComponent(
+            '[Mokinjay] Account Access Request'
+          )}&body=${encodeURIComponent(
+            'Hello Admin,\n\nI would like to request an account to access the Mokinjay workspace.\n\nDetails:\n- Full Name: \n- Requested Email: \n- Organization / Team: \n- Reason / Use Case: \n\nThank you!'
+          )}`}
+          className="text-ink-muted hover:text-ink underline underline-offset-2 transition-colors"
+        >
+          Contact an admin
+        </a>
+      </p>
     </div>
   )
 }
