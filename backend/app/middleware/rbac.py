@@ -17,12 +17,6 @@ def require_workspace_role(min_role: str = "viewer"):
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ) -> WorkspaceMember:
-        # Superusers bypass all workspace RBAC checks
-        if current_user.is_superuser:
-            logger.debug(f"Superuser {current_user.id} bypassing RBAC for workspace {workspace_id}")
-            # Return a dummy member object for compatibility
-            return WorkspaceMember.__new__(WorkspaceMember)
-
         result = await db.execute(
             select(WorkspaceMember).where(
                 WorkspaceMember.workspace_id == workspace_id,
@@ -30,6 +24,16 @@ def require_workspace_role(min_role: str = "viewer"):
             )
         )
         member = result.scalar_one_or_none()
+
+        # Superusers bypass the role check. Handlers still read the member
+        # (user_id for authorship, role for display), so they get their real
+        # row when they have one, else an owner-level stand-in that is never
+        # added to the session (the bypass must not enrol them).
+        if current_user.is_superuser:
+            logger.debug(f"Superuser {current_user.id} bypassing RBAC for workspace {workspace_id}")
+            return member or WorkspaceMember(
+                workspace_id=workspace_id, user_id=current_user.id, role="owner"
+            )
 
         if member is None:
             logger.warning(f"RBAC denied: user {current_user.id} not member of workspace {workspace_id}")
