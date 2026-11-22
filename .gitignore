@@ -92,3 +92,6 @@ api_key_sections/
 # Uploaded files (local storage backend)
 backend/storage/
 .neon
+
+# Isolated git worktrees for plan execution
+.worktrees/
