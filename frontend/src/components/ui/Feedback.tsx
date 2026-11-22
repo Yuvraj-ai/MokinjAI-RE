@@ -1,5 +1,6 @@
-import { AlertTriangle, Info, Loader2, AlertOctagon, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, Info, AlertOctagon, CheckCircle2 } from 'lucide-react'
 import { cn } from '../../lib/utils'
+export { Spinner, IosDefaultSpinner, IosSharpSpinner } from './Spinner'
 
 /** Summary stat card: muted label (+ optional icon), big mono value, optional sub line. */
 export function KpiCard({
@@ -81,6 +82,3 @@ export function EmptyState({
   )
 }
 
-export function Spinner({ className }: { className?: string }) {
-  return <Loader2 className={cn('w-5 h-5 animate-spin text-ink-muted', className)} aria-label="Loading" />
-}

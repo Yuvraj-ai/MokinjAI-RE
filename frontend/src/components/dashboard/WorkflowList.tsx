@@ -51,8 +51,7 @@ export default function WorkflowList({ workspaceId }: WorkflowListProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-24">
-        <Spinner />
-        <span className="ml-3 text-sm text-ink-muted">Loading workflows...</span>
+        <Spinner className="w-6 h-6" />
       </div>
     )
   }

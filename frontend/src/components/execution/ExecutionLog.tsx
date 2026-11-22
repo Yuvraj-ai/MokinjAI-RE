@@ -1,4 +1,5 @@
-import { CheckCircle, XCircle, Clock, Loader2 } from 'lucide-react'
+import { CheckCircle, XCircle, Clock } from 'lucide-react'
+import { IosSharpSpinner } from '../ui/Spinner'
 
 interface NodeLog {
   node_id: string
@@ -23,7 +24,7 @@ const statusConfig: Record<string, { icon: React.ReactNode; bg: string }> = {
     bg: 'bg-status-error/10',
   },
   running: {
-    icon: <Loader2 className="w-3.5 h-3.5 text-status-info animate-spin" />,
+    icon: <IosSharpSpinner className="w-3.5 h-3.5 text-status-info" />,
     bg: 'bg-status-info/10',
   },
   skipped: {

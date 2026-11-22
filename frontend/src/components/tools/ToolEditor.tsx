@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { IosSharpSpinner } from '../ui/Spinner'
 import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { indentWithTab } from '@codemirror/commands'
@@ -110,7 +110,7 @@ export default function ToolEditor({ workspaceId, tool, onSaved, onClose }: Prop
             disabled={saving || !validation?.valid}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-1.5 text-sm font-body font-medium text-primary-fg disabled:opacity-60"
           >
-            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Save
+            {saving && <IosSharpSpinner className="w-3.5 h-3.5" />} Save
           </button>
         </div>
       </div>

@@ -4,19 +4,19 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  Loader2,
   Clock,
   MinusCircle,
   Send,
   Sparkles,
 } from 'lucide-react'
+import { IosSharpSpinner } from './Spinner'
 import { cn } from '../../lib/utils'
 
 export type BadgeTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'purple' | 'orange'
 
 export interface StatusConfig {
   tone: BadgeTone
-  icon: LucideIcon
+  icon: LucideIcon | React.ComponentType<{ className?: string }>
   label: string
   spin?: boolean
 }
@@ -31,10 +31,10 @@ export const STATUS_CONFIG: Record<string, StatusConfig> = {
   ok: { tone: 'success', icon: CheckCircle2, label: 'Connected' },
   success: { tone: 'success', icon: CheckCircle2, label: 'Success' },
 
-  // Progress / Running
-  running: { tone: 'info', icon: Loader2, label: 'Running', spin: true },
-  in_progress: { tone: 'info', icon: Loader2, label: 'In progress', spin: true },
-  checking: { tone: 'info', icon: Loader2, label: 'Checking…', spin: true },
+  // Progress / Running (using Line Sharp Small iOS Spinner)
+  running: { tone: 'info', icon: IosSharpSpinner, label: 'Running', spin: false },
+  in_progress: { tone: 'info', icon: IosSharpSpinner, label: 'In progress', spin: false },
+  checking: { tone: 'info', icon: IosSharpSpinner, label: 'Checking…', spin: false },
 
   // Attention / Pending
   pending: { tone: 'warning', icon: AlertTriangle, label: 'Pending' },
@@ -79,7 +79,7 @@ export function resolveStatusConfig(rawStatus: string): StatusConfig {
     return { tone: 'danger', icon: XCircle, label: formatStatusLabel(rawStatus) }
   }
   if (/^(run|prog|load|check)/.test(clean)) {
-    return { tone: 'info', icon: Loader2, label: formatStatusLabel(rawStatus), spin: true }
+    return { tone: 'info', icon: IosSharpSpinner, label: formatStatusLabel(rawStatus), spin: false }
   }
   if (/^(pend|wait|queu)/.test(clean)) {
     return { tone: 'warning', icon: AlertTriangle, label: formatStatusLabel(rawStatus) }
@@ -135,7 +135,7 @@ const toneStyles: Record<BadgeTone, { text: string; bg: string; border: string; 
     text: 'text-status-info',
     bg: 'bg-status-info-soft',
     border: 'border-current/15',
-    defaultIcon: Loader2,
+    defaultIcon: IosSharpSpinner,
   },
   purple: {
     text: 'text-purple-700 dark:text-purple-300',
@@ -180,7 +180,8 @@ export function StatusBadge({
   const resolved = resolveStatusConfig(status)
   const tone = overrideTone ?? resolved.tone
   const IconComponent = overrideIcon ?? resolved.icon
-  const shouldSpin = overrideSpin ?? (resolved.spin && IconComponent === Loader2)
+  const isIosSpinner = IconComponent === IosSharpSpinner
+  const shouldSpin = overrideSpin ?? (resolved.spin && !isIosSpinner)
   const displayLabel = children ?? label ?? resolved.label
   const currentTone = toneStyles[tone] ?? toneStyles.neutral
 
@@ -203,7 +204,8 @@ export function StatusBadge({
       {IconComponent && (
         <IconComponent
           className={cn(
-            'shrink-0 stroke-[2.2]',
+            'shrink-0',
+            !isIosSpinner && 'stroke-[2.2]',
             isSmall ? 'h-3 w-3' : 'h-3.5 w-3.5',
             shouldSpin && 'animate-spin',
           )}
@@ -257,7 +259,8 @@ export default function Badge({
 
   // If dot was explicitly asked for or an icon was provided, render semantic icon
   const IconComponent = IconProp ?? (dot ? currentTone.defaultIcon : undefined)
-  const shouldSpin = IconComponent === Loader2
+  const isIosSpinner = IconComponent === IosSharpSpinner
+  const shouldSpin = !isIosSpinner && (IconComponent?.name === 'Loader2')
 
   return (
     <span
@@ -275,7 +278,8 @@ export default function Badge({
       {IconComponent && (
         <IconComponent
           className={cn(
-            'shrink-0 stroke-[2.2]',
+            'shrink-0',
+            !isIosSpinner && 'stroke-[2.2]',
             isSmall ? 'h-3 w-3' : 'h-3.5 w-3.5',
             shouldSpin && 'animate-spin',
           )}

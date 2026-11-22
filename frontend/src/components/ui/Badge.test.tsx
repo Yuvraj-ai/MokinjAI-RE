@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import Badge, { StatusBadge, resolveStatusConfig, formatStatusLabel } from './Badge'
-import { CheckCircle2, XCircle, AlertTriangle, Loader2, Clock } from 'lucide-react'
+import { CheckCircle2, XCircle, AlertTriangle, Clock } from 'lucide-react'
+import { IosSharpSpinner } from './Spinner'
 
 describe('Badge and StatusBadge', () => {
   describe('formatStatusLabel', () => {
@@ -26,8 +27,8 @@ describe('Badge and StatusBadge', () => {
     })
 
     it('resolves running/progress statuses', () => {
-      expect(resolveStatusConfig('running')).toMatchObject({ tone: 'info', label: 'Running', spin: true, icon: Loader2 })
-      expect(resolveStatusConfig('in_progress')).toMatchObject({ tone: 'info', label: 'In progress', spin: true, icon: Loader2 })
+      expect(resolveStatusConfig('running')).toMatchObject({ tone: 'info', label: 'Running', icon: IosSharpSpinner })
+      expect(resolveStatusConfig('in_progress')).toMatchObject({ tone: 'info', label: 'In progress', icon: IosSharpSpinner })
     })
 
     it('resolves pending and warning statuses', () => {

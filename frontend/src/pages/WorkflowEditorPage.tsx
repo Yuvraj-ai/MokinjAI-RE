@@ -10,6 +10,7 @@ import { useWorkflowStore } from '../store/workflowStore'
 import { useExecutionStore } from '../store/executionStore'
 import { getWorkflow } from '../api/workflows'
 import { listWorkspaces } from '../api/workspaces'
+import { Spinner } from '../components/ui/Feedback'
 
 export default function WorkflowEditorPage() {
   const { workflowId } = useParams<{ workflowId: string }>()
@@ -58,11 +59,8 @@ export default function WorkflowEditorPage() {
 
     if (loading) {
       return (
-        <div className="flex items-center justify-center h-full bg-canvas">
-          <div className="flex flex-col items-center gap-4 animate-fade-in">
-            <div className="animate-spin rounded-full h-8 w-8 border-2 border-line border-t-ink" />
-            <p className="text-sm text-ink-muted">Loading workflow...</p>
-          </div>
+        <div className="flex items-center justify-center h-full bg-canvas animate-fade-in">
+          <Spinner className="w-8 h-8 text-ink" />
         </div>
       )
     }

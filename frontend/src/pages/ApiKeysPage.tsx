@@ -11,6 +11,7 @@ import {
   createApiKey,
 } from '../api/apiKeys'
 import AgentAccessPicker from '../components/apikeys/AgentAccessPicker'
+import { Spinner } from '../components/ui/Feedback'
 import { StatusBadge } from '../components/ui/Badge'
 import { accessIsValid, accessLabel } from '../lib/agentAccess'
 import { cn } from '../lib/utils'
@@ -246,8 +247,8 @@ export default function ApiKeysPage() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-subtle">
-        Loading…
+      <div className="flex h-full items-center justify-center">
+        <Spinner className="w-6 h-6" />
       </div>
     )
   }

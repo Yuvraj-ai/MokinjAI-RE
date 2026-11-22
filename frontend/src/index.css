@@ -428,3 +428,26 @@ input:focus, textarea:focus, select:focus {
 
 @keyframes lbi-flip-b { from { filter: blur(3px); opacity: 0.5; } }
 
+/* ══ iOS Activity Indicator Spinners ═══════════════════════
+   Authentic iOS activity indicator spoke fading animation.
+   Each spoke remains stationary at its radial position while
+   its opacity cascades clockwise with a fading tail.
+*/
+@keyframes ios-spoke-fade {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.15;
+  }
+}
+
+.ios-spoke {
+  animation: ios-spoke-fade 1s linear infinite;
+}
+
+.ios-spoke-sharp {
+  animation: ios-spoke-fade 0.8s linear infinite;
+}
+
+

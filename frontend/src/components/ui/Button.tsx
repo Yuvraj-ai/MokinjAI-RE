@@ -1,5 +1,5 @@
 import { forwardRef } from 'react'
-import { Loader2 } from 'lucide-react'
+import { IosSharpSpinner } from './Spinner'
 import { cn } from '../../lib/utils'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive'
@@ -43,7 +43,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
       )}
       {...rest}
     >
-      {loading && <Loader2 className="w-4 h-4 animate-spin" aria-hidden />}
+      {loading && <IosSharpSpinner className="w-4 h-4" aria-hidden />}
       {children}
     </button>
   )

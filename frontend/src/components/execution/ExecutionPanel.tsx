@@ -1,11 +1,12 @@
 import { useExecutionStore } from '../../store/executionStore'
 import ExecutionLog from './ExecutionLog'
 import ResultViewer from './ResultViewer'
-import { X, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react'
+import { X, Clock, CheckCircle, XCircle } from 'lucide-react'
+import { IosSharpSpinner } from '../ui/Spinner'
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="w-4 h-4 text-status-warning" />,
-  running: <Loader2 className="w-4 h-4 text-status-info animate-spin" />,
+  running: <IosSharpSpinner className="w-4 h-4 text-status-info" />,
   completed: <CheckCircle className="w-4 h-4 text-status-success" />,
   failed: <XCircle className="w-4 h-4 text-status-error" />,
   cancelled: <XCircle className="w-4 h-4 text-ink-muted" />,

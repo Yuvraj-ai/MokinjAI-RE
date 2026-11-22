@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, Database, Loader2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Database } from 'lucide-react'
+import { IosSharpSpinner } from '../ui/Spinner'
 import {
   getConnectionSchema,
   type ConnectionTableSchema,
@@ -129,9 +130,9 @@ export default function DataSourcePicker({
                       </p>
                     )}
                     {loading && !schemas[connection.id] ? (
-                      <p className="flex items-center gap-1.5 text-xs text-ink-muted">
-                        <Loader2 className="w-3 h-3 animate-spin" /> Loading tables…
-                      </p>
+                      <div className="flex items-center justify-center py-2 text-ink-muted">
+                        <IosSharpSpinner className="w-3.5 h-3.5" />
+                      </div>
                     ) : loadError && !schemas[connection.id] ? (
                       <p className="text-xs text-status-error">{loadError}</p>
                     ) : (

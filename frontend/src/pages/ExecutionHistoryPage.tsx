@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import { listExecutions } from '../api/executions'
 import { listWorkspaces } from '../api/workspaces'
 import { useExecutionStore } from '../store/executionStore'
-import { CheckCircle, XCircle, Clock, Loader2, History } from 'lucide-react'
+import { CheckCircle, XCircle, Clock, History } from 'lucide-react'
+import { IosSharpSpinner } from '../components/ui/Spinner'
 import type { Execution } from '../types/execution'
 import { EmptyState, Spinner } from '../components/ui/Feedback'
 import Badge, { StatusBadge } from '../components/ui/Badge'
@@ -12,7 +13,7 @@ import { TableFrame, Table, Th, Td, Tr } from '../components/ui/Table'
 
 const statusIcons: Record<string, React.ReactNode> = {
   pending: <Clock className="w-3.5 h-3.5" aria-hidden />,
-  running: <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />,
+  running: <IosSharpSpinner className="w-3.5 h-3.5" aria-hidden />,
   completed: <CheckCircle className="w-3.5 h-3.5" aria-hidden />,
   failed: <XCircle className="w-3.5 h-3.5" aria-hidden />,
   cancelled: <XCircle className="w-3.5 h-3.5" aria-hidden />,

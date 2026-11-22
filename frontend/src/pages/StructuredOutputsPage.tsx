@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Braces, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Braces, Plus, Trash2 } from 'lucide-react'
+import { IosSharpSpinner } from '../components/ui/Spinner'
 import { listWorkspaces } from '../api/workspaces'
 import {
   createStructuredOutput,
@@ -230,7 +231,7 @@ export default function StructuredOutputsPage() {
                 disabled={saving}
                 className="inline-flex items-center gap-2 rounded-lg border border-line bg-surface px-4 py-1.5 text-[13px] font-medium text-ink hover:bg-surface-muted transition-colors disabled:opacity-50"
               >
-                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />} Save
+                {saving && <IosSharpSpinner className="w-3.5 h-3.5" aria-hidden />} Save
               </button>
             </div>
           </div>

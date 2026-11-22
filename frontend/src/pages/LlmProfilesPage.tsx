@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Loader2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
+import { IosSharpSpinner } from '../components/ui/Spinner'
 import { listWorkspaces } from '../api/workspaces'
 import {
   deleteLlmProfile,
@@ -345,7 +346,7 @@ export default function LlmProfilesPage() {
             <p className="text-sm text-status-error whitespace-pre-wrap">{formError}</p>
           )}
           <Button type="submit" disabled={testing} className="w-full sm:w-auto">
-            {testing && <Loader2 className="w-3 h-3 animate-spin" aria-hidden />}
+            {testing && <IosSharpSpinner className="w-3 h-3" aria-hidden />}
             {testing ? 'Verifying…' : 'Test connection'}
           </Button>
         </form>

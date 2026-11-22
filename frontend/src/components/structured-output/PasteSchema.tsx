@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { IosSharpSpinner } from '../ui/Spinner'
 import type { OutputField } from '../../api/structuredOutputs'
 import Button from '../ui/Button'
 
@@ -59,7 +59,7 @@ export default function PasteSchema({ onParse, onUse }: Props) {
         <p className="text-xs text-status-error whitespace-pre-wrap">{error}</p>
       )}
       <Button disabled={parsing || !raw.trim()} onClick={() => void parse()} className="w-full sm:w-auto">
-        {parsing && <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden />}
+        {parsing && <IosSharpSpinner className="w-3.5 h-3.5" aria-hidden />}
         Parse
       </Button>
     </div>

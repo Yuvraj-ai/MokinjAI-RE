@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Database, Loader2, Plus, Trash2 } from 'lucide-react'
+import { Database, Plus, Trash2 } from 'lucide-react'
+import { IosSharpSpinner } from '../components/ui/Spinner'
 import { axiosDetail } from '../api/client'
 import { listWorkspaces } from '../api/workspaces'
 import {
@@ -123,8 +124,8 @@ export default function DataSourcesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-8 text-sm text-ink-muted">
-        <Spinner /> Loading connections…
+      <div className="flex items-center justify-center p-12">
+        <Spinner className="w-6 h-6" />
       </div>
     )
   }
@@ -253,7 +254,7 @@ export default function DataSourcesPage() {
                     disabled={checks[row.id]?.status === 'checking'}
                   >
                     {checks[row.id]?.status === 'checking' ? (
-                      <Loader2 className="w-3 h-3 animate-spin" aria-hidden />
+                      <IosSharpSpinner className="w-3 h-3" aria-hidden />
                     ) : null}
                     Check
                   </button>

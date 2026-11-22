@@ -9,6 +9,7 @@ import {
 } from '../api/agents'
 import { availableFormats, DEFAULT_OUTPUT_FORMAT, reconcileFormat } from '../lib/outputFormat'
 import { listWorkspaces } from '../api/workspaces'
+import { Spinner } from '../components/ui/Feedback'
 import {
   createSession,
   deleteSession,
@@ -184,8 +185,8 @@ export default function PlaygroundPage() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-[13px] text-ink-subtle">
-        Loading…
+      <div className="flex h-full items-center justify-center">
+        <Spinner className="w-6 h-6" />
       </div>
     )
   }

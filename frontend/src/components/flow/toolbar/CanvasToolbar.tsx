@@ -1,6 +1,7 @@
 import React, { useCallback, useState, useRef, useEffect } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { Save, Play, ZoomIn, ZoomOut, Maximize, Loader2, Pencil } from 'lucide-react';
+import { Save, Play, ZoomIn, ZoomOut, Maximize, Pencil } from 'lucide-react';
+import { IosSharpSpinner } from '../../ui/Spinner';
 import useWorkflowStore from '../../../store/workflowStore';
 import { useExecutionStore } from '../../../store/executionStore';
 import { updateWorkflow } from '../../../api/workflows';
@@ -100,7 +101,7 @@ const CanvasToolbar: React.FC<CanvasToolbarProps> = ({ workspaceId, workflowId }
           )}
         >
           {saving ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <IosSharpSpinner className="w-4 h-4" />
           ) : (
             <Save className="w-4 h-4" />
           )}
@@ -117,7 +118,7 @@ const CanvasToolbar: React.FC<CanvasToolbarProps> = ({ workspaceId, workflowId }
           )}
         >
           {isRunning ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <IosSharpSpinner className="w-4 h-4" />
           ) : (
             <Play className="w-4 h-4" />
           )}

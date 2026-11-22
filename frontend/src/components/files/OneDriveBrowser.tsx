@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronLeft, Folder as FolderIcon, Loader2 } from 'lucide-react'
+import { ChevronLeft, Folder as FolderIcon } from 'lucide-react'
+import { IosSharpSpinner } from '../ui/Spinner'
 import { axiosDetail } from '../../api/client'
 import {
   getConnectionStatus,
@@ -128,8 +129,8 @@ export default function OneDriveBrowser({ open, workspaceId, onClose, onImported
       }
     >
       {connected === null && (
-        <div className="flex items-center gap-2 text-sm text-ink-muted">
-          <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> Checking OneDrive…
+        <div className="flex items-center justify-center py-4 text-ink-muted">
+          <IosSharpSpinner className="w-5 h-5" aria-hidden />
         </div>
       )}
 
@@ -175,8 +176,8 @@ export default function OneDriveBrowser({ open, workspaceId, onClose, onImported
           </div>
 
           {loading ? (
-            <div className="flex items-center gap-2 py-6 text-sm text-ink-muted">
-              <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> Loading…
+            <div className="flex items-center justify-center py-8 text-ink-muted">
+              <IosSharpSpinner className="w-5 h-5" aria-hidden />
             </div>
           ) : items.length === 0 ? (
             <p className="py-6 text-sm text-ink-subtle">This folder is empty.</p>
