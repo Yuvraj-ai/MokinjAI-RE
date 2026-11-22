@@ -921,3 +921,35 @@ class TestContentReset:
             )
         ]
         assert "content_reset" not in [e["event"] for e in events]
+
+
+class TestOutputFormatPrompt:
+    def _validated(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            resolved_skills=SimpleNamespace(menu=[]), data_sources=[]
+        )
+
+    def test_markdown_adds_nothing(self):
+        from app.services.agent_runtime import _system_prompt
+
+        assert _system_prompt("Be brief.", self._validated(), "markdown") == "Be brief."
+        assert _system_prompt("Be brief.", self._validated()) == "Be brief."
+
+    def test_openui_appends_the_generated_prompt_last(self):
+        from app.services.agent_runtime import _system_prompt
+        from app.services.output_formats import openui_prompt
+
+        prompt = _system_prompt("Be brief.", self._validated(), "openui")
+        assert prompt.startswith("Be brief.\n\n")
+        assert prompt.endswith(openui_prompt())
+        assert "root = Card(" in openui_prompt()
+
+    def test_subagents_never_get_the_openui_prompt(self, monkeypatch):
+        import inspect
+
+        from app.services import agent_runtime
+
+        source = inspect.getsource(agent_runtime._subagent_runner)
+        assert "output_format" not in source

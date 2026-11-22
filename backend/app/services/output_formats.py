@@ -11,6 +11,8 @@ models are never consulted. This module is the only place the threshold lives;
 the frontend reads the resulting list from the agent's capabilities.
 """
 
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 MARKDOWN = "markdown"
@@ -24,6 +26,19 @@ ALL_OUTPUT_FORMATS = (MARKDOWN, OPENUI)
 
 class UnsupportedOutputFormat(ValueError):
     """The requested format is unknown, or the model is not eligible for it."""
+
+
+_OPENUI_PROMPT_FILE = Path(__file__).with_name("openui_prompt.txt")
+
+
+@lru_cache(maxsize=1)
+def openui_prompt() -> str:
+    """The OpenUI instructions appended to the system prompt for OpenUI turns.
+
+    Generated from the frontend's component library (`npm run openui:prompt`)
+    and committed; a frontend test fails if the two drift apart.
+    """
+    return _OPENUI_PROMPT_FILE.read_text(encoding="utf-8")
 
 
 def _usable_window(context_window: Any) -> int | None:

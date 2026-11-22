@@ -58,7 +58,9 @@ from app.services.agent_tools import (
 from app.services.connector_runtime import load_connector_tools
 from app.services.output_formats import (
     DEFAULT_OUTPUT_FORMAT,
+    OPENUI,
     UnsupportedOutputFormat,
+    openui_prompt,
     require_supported,
 )
 from app.services.sandbox import InMemoryToolSource, SandboxConfig, SandboxSession
@@ -379,6 +381,9 @@ def _system_prompt(
                 "the list, and a JSON filter object (find() semantics, read-only); call "
                 f"describe_data_source to discover fields.\n{lines}"
             )
+    if output_format == OPENUI:
+        # Last, so the format rules sit closest to the conversation.
+        sections.append(openui_prompt())
     if not sections:
         return prompt
     return prompt + "\n\n" + "\n\n".join(sections)
