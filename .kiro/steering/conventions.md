@@ -34,6 +34,7 @@ inclusion: always
 - Migrations are never automatic. Remote DBs need `ALLOW_REMOTE_MIGRATIONS=1`.
 - Sandbox runs `--network none`, read-only root, tmpfs work/output, non-root, memory/CPU capped, hard timeout. The in-sandbox `ctx` is offline only. DB and HTTP access come from host-side tools and connectors.
 - Data-source queries are read-only in five layers: recommended DB role, read-only transaction, sqlglot SELECT-only guard with per-agent table allowlist, row/byte/time limits, audit log. Cloud metadata hosts are blocked before dialing.
+- Runs are fail-safe. Every agent graph (main and subagents) gets the tool middleware from `services/agent_resilience.py`: `ToolRetryMiddleware` retries transient errors only (timeouts, connection errors, HTTP 429/5xx) up to 2 times with 1 s then 2 s backoff; `ToolErrorMiddleware` returns any other tool exception to the model as an error message; `ToolFailureLimitMiddleware` stops calling a tool after 3 failures in one run (successes are never limited). A component that fails while the run is built (MCP connector unreachable or over the 15 s load timeout, missing web-search key, tool code that no longer parses, attached file missing from storage) is skipped, logged as one WARNING line, listed to the model in the system prompt and streamed as an `unavailable` activity card. A retried call shows as one card ("after N attempts").
 - Licensing: do not copy GPL code into this project. The logging module is an independent implementation.
 
 ## Design conventions
