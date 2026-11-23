@@ -30,7 +30,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from sqlalchemy import select
 
 from app.crypto import decrypt_api_key
-from app.services.agent_resilience import tool_middleware
+from app.services.agent_resilience import short_message, tool_middleware
 from app.database import async_session
 from app.logging import logger
 from app.models.agent import Agent
@@ -209,7 +209,12 @@ async def build_tools(
     *,
     depth: int,
     filenames: list[str] | None = None,
+    unavailable: list[str] | None = None,
 ) -> list[BaseTool | dict[str, Any]]:
+    """The run's tools. A component that fails to build is skipped and logged, and
+    named in `unavailable` so the model can be told; it never fails the turn."""
+    if unavailable is None:
+        unavailable = []
     tools: list[BaseTool | dict[str, Any]] = []
     workspace_tools = {row.name.lower(): row for row in validated.workspace_tools}
     builtins = {entry.key.lower(): entry for entry in list_builtin_tools()}
@@ -219,7 +224,11 @@ async def build_tools(
         if row is not None:
             extracted = extract_schema(row.code)
             if extracted.schema is None:
-                raise AgentRuntimeError(extraction_error(row.name, extracted))
+                logger.warning(
+                    f"Tool {row.name!r} skipped for this run: {extraction_error(row.name, extracted)}"
+                )
+                unavailable.append(f"Tool {row.name} (code no longer parses)")
+                continue
             tools.append(user_tool(extracted.schema, session))
             continue
         entry = builtins.get(name.lower())
@@ -262,7 +271,9 @@ async def build_tools(
     if validated.selected_skills:
         tools.append(read_skill_tool(validated.resolved_skills))
 
-    tools.extend(await load_connector_tools(validated.connectors))
+    connector_tools, failed_connectors = await load_connector_tools(validated.connectors)
+    tools.extend(connector_tools)
+    unavailable.extend(f"Connector {name} (unreachable)" for name in failed_connectors)
 
     if depth + 1 < DEFAULT_MAX_SUBAGENT_DEPTH:
         for child in validated.subagents:
@@ -287,10 +298,24 @@ async def build_tools(
                 )
             ).scalar_one_or_none()
             if credential is None:
-                raise AgentRuntimeError(f"no {method} API key is stored for this workspace")
-            tools.append(
-                build_web_search_tool(method, decrypt_api_key(credential.encrypted_api_key))
-            )
+                logger.warning(
+                    f"Web search skipped for this run: no {method} API key is stored "
+                    "for this workspace"
+                )
+                unavailable.append(f"Web search: no {method} API key")
+            else:
+                try:
+                    tools.append(
+                        build_web_search_tool(
+                            method, decrypt_api_key(credential.encrypted_api_key)
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"Web search skipped for this run: {type(exc).__name__}: "
+                        f"{short_message(exc)}"
+                    )
+                    unavailable.append(f"Web search: {method} unavailable")
         elif method == "native":
             spec = native_web_search_spec(validated.profile.provider)
             if spec is not None:
@@ -324,12 +349,13 @@ def build_graph(
     *,
     streaming: bool,
     output_format: str | None = None,
+    unavailable: list[str] | None = None,
 ):
     model = build_chat_model(validated.profile, validated.params, streaming=streaming)
     return create_agent(
         model,
         tools,
-        system_prompt=_system_prompt(agent.system_prompt, validated, output_format),
+        system_prompt=_system_prompt(agent.system_prompt, validated, output_format, unavailable),
         response_format=(
             ToolStrategy(validated.structured_schema)
             if validated.structured_schema is not None
@@ -341,7 +367,10 @@ def build_graph(
 
 
 def _system_prompt(
-    prompt: str, validated: ValidatedAgent, output_format: str | None = None
+    prompt: str,
+    validated: ValidatedAgent,
+    output_format: str | None = None,
+    unavailable: list[str] | None = None,
 ) -> str:
     sections: list[str] = []
     menu = validated.resolved_skills.menu
@@ -383,6 +412,11 @@ def _system_prompt(
                 "the list, and a JSON filter object (find() semantics, read-only); call "
                 f"describe_data_source to discover fields.\n{lines}"
             )
+    if unavailable:
+        sections.append(
+            f"These are unavailable for this run: {'; '.join(unavailable)}. "
+            "Do not call them; tell the user if the task needs them."
+        )
     if output_format == OPENUI:
         # Last, so the format rules sit closest to the conversation.
         sections.append(openui_prompt())
@@ -489,10 +523,19 @@ def _subagent_runner(workspace_id: str, child_id: str, depth: int):
                 session, reserved_mb = _open_session(
                     workspace_id, validated, str(staging) if staging else None
                 )
+                unavailable: list[str] = []
                 tools = await build_tools(
-                    db, workspace_id, validated, session, depth=depth, filenames=filenames
+                    db,
+                    workspace_id,
+                    validated,
+                    session,
+                    depth=depth,
+                    filenames=filenames,
+                    unavailable=unavailable,
                 )
-                graph = build_graph(validated, child, tools, streaming=False)
+                graph = build_graph(
+                    validated, child, tools, streaming=False, unavailable=unavailable
+                )
             result = await graph.ainvoke({"messages": [HumanMessage(content=task)]})
             return _message_text(result.get("messages", [])[-1]) or "(the subagent returned no answer)"
         finally:
@@ -809,11 +852,23 @@ async def stream_turn(
             sandbox, reserved_mb = _open_session(
                 workspace_id, validated, str(staging) if staging else None
             )
+            unavailable: list[str] = []
             tools = await build_tools(
-                db, workspace_id, validated, sandbox, depth=0, filenames=filenames
+                db,
+                workspace_id,
+                validated,
+                sandbox,
+                depth=0,
+                filenames=filenames,
+                unavailable=unavailable,
             )
             graph = build_graph(
-                validated, agent, tools, streaming=True, output_format=output_format
+                validated,
+                agent,
+                tools,
+                streaming=True,
+                output_format=output_format,
+                unavailable=unavailable,
             )
             model_snapshot = (validated.profile.provider, validated.profile.model_id)
             await _bump_run_usage(db, workspace_id, validated)
@@ -832,6 +887,12 @@ async def stream_turn(
             _remember(staged_event)
             await _flush_activity(assistant_message_id, activity)
             yield {"event": "activity", "data": staged_event}
+
+        if unavailable:
+            unavailable_event: dict[str, Any] = {"type": "unavailable", "names": list(unavailable)}
+            _remember(unavailable_event)
+            await _flush_activity(assistant_message_id, activity)
+            yield {"event": "activity", "data": unavailable_event}
 
         history = [
             HumanMessage(content=row.content)

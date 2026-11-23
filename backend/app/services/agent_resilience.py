@@ -53,7 +53,8 @@ def is_transient(exc: BaseException) -> bool:
     return _status_code(exc) in _TRANSIENT_STATUS
 
 
-def _short_message(exc: BaseException) -> str:
+def short_message(exc: BaseException) -> str:
+    """One line, credentials in URLs masked, capped. Safe to log or show the model."""
     text = _URL_CREDENTIALS.sub("://***@", " ".join(str(exc).split()))
     if len(text) > _MAX_MESSAGE_CHARS:
         text = text[: _MAX_MESSAGE_CHARS - 3] + "..."
@@ -63,7 +64,7 @@ def _short_message(exc: BaseException) -> str:
 def tool_error_message(exc: Exception, request: ToolCallRequest) -> str:
     """Log one warning (no traceback) and return the text the model will see."""
     name = request.tool.name if request.tool else request.tool_call["name"]
-    message = _short_message(exc)
+    message = short_message(exc)
     kind = type(exc).__name__
     logger.warning("Tool %s failed: %s: %s", name, kind, message)
     return (
