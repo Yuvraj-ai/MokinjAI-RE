@@ -30,8 +30,15 @@ Built and verified in a browser against a scratch database with a stub OpenAI-co
 
 Not verified against real providers yet: how reliably each model writes valid OpenUI.
 
+## Fail-safe runs
+
+A failing tool or component does not end a run: transient tool errors are retried, other tool errors go back to the model, and components that cannot load are skipped and reported to the model and the activity stream. Sandbox contention queues per workspace (2 minutes, 20 waiting) and then fails with `sandbox_busy` (429 on buffered `/v1/chat`). A connector tool call that exceeds the 60 s ceiling is reported to the model and is not retried. Details are in conventions and product.
+
 ## Known gaps (open)
 
+- A busy 429 leaves the user message in the conversation, so a client retry repeats the user turn.
+- The Playground's waiting line can linger briefly after Stop or an early error until the session refetches.
+- The sandbox queue is in-process; with several API workers each has its own queue.
 - The public `/v1` buffered response concatenates text from every model step, including narration before a tool call; the persisted message keeps only the final step.
 - The OpenUI packages declare `zustand@^4` as a peer; a package.json override runs them on the app's zustand 5. Re-check after upgrading them.
 - Test suite is not fully green: a small number of `@tool` decorator tests in `test_builtin_tools.py` fail (reproduce when the file runs alone).

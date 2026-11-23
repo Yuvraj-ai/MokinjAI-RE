@@ -15,9 +15,14 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from app.crypto import decrypt_api_key
+from app.logging import logger
 from app.models.connector import ConnectorInstance
+from app.services.agent_resilience import short_message
+from app.services.agent_resilience import ToolTimeoutError
 from app.services.agent_tools import TOOL_TIMEOUT_S
 from app.services.connector_catalog import CatalogEntry, get_entry
+
+CONNECTOR_LOAD_TIMEOUT_S = 15
 
 
 class ConnectorProbeError(Exception):
@@ -142,7 +147,9 @@ async def probe_connector_tools(instance: ConnectorInstance) -> list[str]:
     return await _list_tool_names(connection_for(instance), server_name=instance.id)
 
 
-async def load_connector_tools(instances: Sequence[ConnectorInstance]) -> list[BaseTool]:
+async def load_connector_tools(
+    instances: Sequence[ConnectorInstance],
+) -> tuple[list[BaseTool], list[str]]:
     """Every tool the given connectors expose, as LangChain tools.
 
     This is Phase 3's entry point. It does not filter by `status`: an agent's assignment
@@ -151,21 +158,36 @@ async def load_connector_tools(instances: Sequence[ConnectorInstance]) -> list[B
     collision can be attributed; when two servers expose the same name, both are prefixed
     with their owning instance's slug. Renaming is safe because the adapter opens the
     session at invocation time from the stored connection, not from the tool's name.
+
+    A connector that errors or does not answer within `CONNECTOR_LOAD_TIMEOUT_S` is
+    skipped and logged; the second return value names those connectors.
     """
     if not instances:
-        return []
+        return [], []
     client = MultiServerMCPClient(connections_for(instances))
 
     loaded: list[tuple[str, BaseTool]] = []
+    failed: list[str] = []
     for instance in instances:
-        for tool in await client.get_tools(server_name=instance.id):
+        try:
+            found = await asyncio.wait_for(
+                client.get_tools(server_name=instance.id), timeout=CONNECTOR_LOAD_TIMEOUT_S
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Connector {instance.name!r} skipped for this run: "
+                f"{type(exc).__name__}: {short_message(exc)}"
+            )
+            failed.append(instance.name)
+            continue
+        for tool in found:
             loaded.append((instance.name, tool))
 
     collisions = Counter(tool.name for _, tool in loaded)
     for owner, tool in loaded:
         if collisions[tool.name] > 1:
             tool.name = f"{slug(owner)}_{tool.name}"
-    return [with_timeout(tool) for _, tool in loaded]
+    return [with_timeout(tool) for _, tool in loaded], failed
 
 
 def with_timeout(tool: BaseTool) -> BaseTool:
@@ -180,7 +202,12 @@ def with_timeout(tool: BaseTool) -> BaseTool:
         return tool
 
     async def bounded(**kwargs):
-        return await asyncio.wait_for(inner(**kwargs), timeout=TOOL_TIMEOUT_S)
+        try:
+            return await asyncio.wait_for(inner(**kwargs), timeout=TOOL_TIMEOUT_S)
+        except asyncio.TimeoutError as exc:
+            raise ToolTimeoutError(
+                f"`{tool.name}` did not finish within {TOOL_TIMEOUT_S:g}s"
+            ) from exc
 
     return StructuredTool(
         name=tool.name,

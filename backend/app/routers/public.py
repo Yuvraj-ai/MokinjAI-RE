@@ -183,7 +183,15 @@ async def public_chat(
 
     if body.stream:
         return StreamingResponse(
-            _sse(stream_turn(key.workspace_id, session.id, body.message, execution.id)),
+            _sse(
+                stream_turn(
+                    key.workspace_id,
+                    session.id,
+                    body.message,
+                    execution.id,
+                    session_created_by_turn=not body.conversation_id,
+                )
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -200,7 +208,14 @@ async def public_chat(
     cost = 0.0
     status = "completed"
     error_detail: str | None = None
-    async for event in stream_turn(key.workspace_id, session.id, body.message, execution.id):
+    busy: PublicAuthError | None = None
+    async for event in stream_turn(
+        key.workspace_id,
+        session.id,
+        body.message,
+        execution.id,
+        session_created_by_turn=not body.conversation_id,
+    ):
         kind = event["event"]
         if kind == "token":
             content_parts.append(event["data"]["delta"])
@@ -215,6 +230,13 @@ async def public_chat(
         elif kind == "error":
             error_detail = event["data"]["detail"]
             status = "failed"
+            if event["data"].get("code") == "sandbox_busy":
+                busy = PublicAuthError(
+                    "sandbox_busy", error_detail, event["data"].get("retry_after_s")
+                )
+
+    if busy is not None:
+        raise busy
 
     assistant = (
         await db.execute(

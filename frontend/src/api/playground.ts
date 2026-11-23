@@ -18,8 +18,10 @@ export interface PlaygroundSession {
 }
 
 export interface ActivityEvent {
-  type: 'tool_start' | 'tool_end' | 'files_staged'
+  type: 'tool_start' | 'tool_end' | 'files_staged' | 'unavailable'
   id?: string
+  /** Only present when a tool call needed more than one attempt. */
+  attempts?: number
   name?: string
   kind?: 'sql' | 'code' | 'skill' | 'mcp' | 'web' | 'subagent' | 'tool'
   args?: unknown
@@ -58,7 +60,8 @@ export type PlaygroundEvent =
   | { type: 'reasoning'; delta: string }
   | { type: 'activity'; payload: ActivityEvent }
   | { type: 'done'; usage: PlaygroundMessage['usage']; cost_usd: number; status: string }
-  | { type: 'error'; detail: string }
+  | { type: 'queued'; position: number }
+  | { type: 'error'; detail: string; code?: string; retryAfterS?: number }
 
 export async function listSessions(workspaceId: string, agentId?: string): Promise<PlaygroundSession[]> {
   const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ''
@@ -234,8 +237,15 @@ export async function* streamSessionChat(
           cost_usd: Number(d.cost_usd ?? 0),
           status: String(d.status ?? 'completed'),
         }
+      else if (event.event === 'queued')
+        yield { type: 'queued', position: Number(d.position ?? 1) }
       else if (event.event === 'error')
-        yield { type: 'error', detail: String(d.detail ?? 'The turn failed.') }
+        yield {
+          type: 'error',
+          detail: String(d.detail ?? 'The turn failed.'),
+          ...(typeof d.code === 'string' ? { code: d.code } : {}),
+          ...(typeof d.retry_after_s === 'number' ? { retryAfterS: d.retry_after_s } : {}),
+        }
     }
   }
 }

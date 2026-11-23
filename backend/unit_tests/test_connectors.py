@@ -943,8 +943,9 @@ async def test_load_connector_tools_builds_the_client_from_the_instances(
     _StubClient.tools_by_server = {first.id: ["get_me"], second.id: ["read_file"]}
     monkeypatch.setattr(connector_runtime, "MultiServerMCPClient", _StubClient)
 
-    tools = await connector_runtime.load_connector_tools([first, second])
+    tools, failed = await connector_runtime.load_connector_tools([first, second])
 
+    assert failed == []
     assert [tool.name for tool in tools] == ["get_me", "read_file"]
     assert set(_StubClient.connections_seen[0]) == {first.id, second.id}, "keyed by instance id"
     assert (
@@ -989,8 +990,9 @@ async def test_load_connector_tools_prefixes_a_colliding_name(
     _StubClient.tools_by_server = {first.id: ["search"], second.id: ["search"]}
     monkeypatch.setattr(connector_runtime, "MultiServerMCPClient", _StubClient)
 
-    tools = await connector_runtime.load_connector_tools([first, second])
+    tools, failed = await connector_runtime.load_connector_tools([first, second])
 
+    assert failed == []
     assert sorted(tool.name for tool in tools) == ["main_search", "other_search"]
 
 
@@ -1001,4 +1003,4 @@ async def test_load_connector_tools_returns_nothing_without_instances(monkeypatc
         lambda *args, **kwargs: pytest.fail("no client should be built with nothing to load"),
     )
 
-    assert await connector_runtime.load_connector_tools([]) == []
+    assert await connector_runtime.load_connector_tools([]) == ([], [])

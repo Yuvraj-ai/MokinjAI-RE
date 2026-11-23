@@ -34,6 +34,8 @@ interface RenderedAssistant {
   usage: PlaygroundMessage['usage']
   cost_usd: number | null
   format: OutputFormat
+  /** Position in the sandbox wait line; set only while the run is queued. */
+  queuedPosition?: number | null
 }
 
 function fromPersisted(message: PlaygroundMessage): RenderedAssistant {
@@ -86,7 +88,9 @@ const AssistantTurn = memo(function AssistantTurn({
           onFollowUp={onFollowUp}
         />
       ) : streaming ? (
-        <p className="px-1 py-1 text-[13px] text-ink-subtle">…</p>
+        <p className="px-1 py-1 text-[13px] text-ink-subtle">
+          {turn.queuedPosition ? `Waiting for a sandbox slot (position ${turn.queuedPosition})…` : '…'}
+        </p>
       ) : null}
       {turn.status === 'stopped' && (
         <span className="mx-1 flex items-center gap-1 text-[10.5px] text-ink-subtle">
@@ -212,6 +216,12 @@ export default function ThreadPane({
     }
 
     try {
+      let queued = false
+      const leaveQueue = () => {
+        if (!queued) return
+        queued = false
+        setInflight((current) => (current ? { ...current, queuedPosition: null } : current))
+      }
       for await (const event of streamSessionChat(
         workspaceId,
         session.id,
@@ -219,7 +229,13 @@ export default function ThreadPane({
         outputFormat,
         controller.signal
       )) {
-        if (event.type === 'token') {
+        if (event.type === 'queued') {
+          queued = true
+          setInflight((current) =>
+            current ? { ...current, queuedPosition: event.position } : current
+          )
+        } else if (event.type === 'token') {
+          leaveQueue()
           pendingContent += event.delta
           scheduleFlush()
         } else if (event.type === 'content_reset') {
@@ -228,9 +244,11 @@ export default function ThreadPane({
           pendingContent = ''
           setInflight((current) => (current ? { ...current, content: '' } : current))
         } else if (event.type === 'reasoning') {
+          leaveQueue()
           pendingReasoning += event.delta
           scheduleFlush()
         } else if (event.type === 'activity') {
+          leaveQueue()
           flush()
           setInflight((current) =>
             current ? { ...current, events: [...current.events, event.payload] } : current

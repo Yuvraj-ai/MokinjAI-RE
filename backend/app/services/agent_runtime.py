@@ -30,6 +30,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from sqlalchemy import select
 
 from app.crypto import decrypt_api_key
+from app.services.agent_resilience import short_message, tool_middleware
 from app.database import async_session
 from app.logging import logger
 from app.models.agent import Agent
@@ -64,8 +65,14 @@ from app.services.output_formats import (
     require_supported,
 )
 from app.services.sandbox import InMemoryToolSource, SandboxConfig, SandboxSession
-from app.services.sandbox.budget import release, reserve
-from app.services.storage import StorageError, get_storage
+from app.services.sandbox.budget import (
+    MIN_RETRY_AFTER_S,
+    SandboxBusy,
+    SlotRequest,
+    release,
+    reserve,
+)
+from app.services.storage import ObjectNotFoundError, StorageError, get_storage
 from app.services.tool_schema import extract_schema, extraction_error
 from app.services.web_search import build_web_search_tool, native_web_search_spec
 from app.tools.registry import list_builtin_tools
@@ -208,7 +215,12 @@ async def build_tools(
     *,
     depth: int,
     filenames: list[str] | None = None,
+    unavailable: list[str] | None = None,
 ) -> list[BaseTool | dict[str, Any]]:
+    """The run's tools. A component that fails to build is skipped and logged, and
+    named in `unavailable` so the model can be told; it never fails the turn."""
+    if unavailable is None:
+        unavailable = []
     tools: list[BaseTool | dict[str, Any]] = []
     workspace_tools = {row.name.lower(): row for row in validated.workspace_tools}
     builtins = {entry.key.lower(): entry for entry in list_builtin_tools()}
@@ -218,7 +230,11 @@ async def build_tools(
         if row is not None:
             extracted = extract_schema(row.code)
             if extracted.schema is None:
-                raise AgentRuntimeError(extraction_error(row.name, extracted))
+                logger.warning(
+                    f"Tool {row.name!r} skipped for this run: {extraction_error(row.name, extracted)}"
+                )
+                unavailable.append(f"Tool {row.name} (code no longer parses)")
+                continue
             tools.append(user_tool(extracted.schema, session))
             continue
         entry = builtins.get(name.lower())
@@ -261,7 +277,9 @@ async def build_tools(
     if validated.selected_skills:
         tools.append(read_skill_tool(validated.resolved_skills))
 
-    tools.extend(await load_connector_tools(validated.connectors))
+    connector_tools, failed_connectors = await load_connector_tools(validated.connectors)
+    tools.extend(connector_tools)
+    unavailable.extend(f"Connector {name} (unreachable)" for name in failed_connectors)
 
     if depth + 1 < DEFAULT_MAX_SUBAGENT_DEPTH:
         for child in validated.subagents:
@@ -286,10 +304,24 @@ async def build_tools(
                 )
             ).scalar_one_or_none()
             if credential is None:
-                raise AgentRuntimeError(f"no {method} API key is stored for this workspace")
-            tools.append(
-                build_web_search_tool(method, decrypt_api_key(credential.encrypted_api_key))
-            )
+                logger.warning(
+                    f"Web search skipped for this run: no {method} API key is stored "
+                    "for this workspace"
+                )
+                unavailable.append(f"Web search: no {method} API key")
+            else:
+                try:
+                    tools.append(
+                        build_web_search_tool(
+                            method, decrypt_api_key(credential.encrypted_api_key)
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"Web search skipped for this run: {type(exc).__name__}: "
+                        f"{short_message(exc)}"
+                    )
+                    unavailable.append(f"Web search: {method} unavailable")
         elif method == "native":
             spec = native_web_search_spec(validated.profile.provider)
             if spec is not None:
@@ -323,23 +355,28 @@ def build_graph(
     *,
     streaming: bool,
     output_format: str | None = None,
+    unavailable: list[str] | None = None,
 ):
     model = build_chat_model(validated.profile, validated.params, streaming=streaming)
     return create_agent(
         model,
         tools,
-        system_prompt=_system_prompt(agent.system_prompt, validated, output_format),
+        system_prompt=_system_prompt(agent.system_prompt, validated, output_format, unavailable),
         response_format=(
             ToolStrategy(validated.structured_schema)
             if validated.structured_schema is not None
             else None
         ),
         name=_graph_name(agent),
+        middleware=tool_middleware(),
     )
 
 
 def _system_prompt(
-    prompt: str, validated: ValidatedAgent, output_format: str | None = None
+    prompt: str,
+    validated: ValidatedAgent,
+    output_format: str | None = None,
+    unavailable: list[str] | None = None,
 ) -> str:
     sections: list[str] = []
     menu = validated.resolved_skills.menu
@@ -381,6 +418,11 @@ def _system_prompt(
                 "the list, and a JSON filter object (find() semantics, read-only); call "
                 f"describe_data_source to discover fields.\n{lines}"
             )
+    if unavailable:
+        sections.append(
+            f"These are unavailable for this run: {'; '.join(unavailable)}. "
+            "Do not call them; tell the user if the task needs them."
+        )
     if output_format == OPENUI:
         # Last, so the format rules sit closest to the conversation.
         sections.append(openui_prompt())
@@ -417,58 +459,87 @@ def _attachment_name(raw: str | None, fallback: str, used: set[str]) -> str:
     return candidate
 
 
-async def _stage_files(documents: list[Document]) -> tuple[Path | None, list[str]]:
+async def _stage_files(
+    documents: list[Document],
+) -> tuple[Path | None, list[str], list[str]]:
     """Download the run's files into a directory the sandbox mounts read-only.
 
     A missing object is logged and skipped rather than killing the run: the rest of the
-    files are still worth reading, and the model can say one name was not there.
+    files are still worth reading. Its name is returned as the third item so the caller
+    can tell the model the file is attached but not in storage.
     """
     if not documents:
-        return None, []
+        return None, [], []
     staging = Path(tempfile.mkdtemp(prefix="mokinjay-files-"))
     storage = get_storage()
     used: set[str] = set()
     names: list[str] = []
+    missing: list[str] = []
     for row in documents:
         if not row.file_url:
             continue
+        name = _attachment_name(row.filename, row.id, used)
         try:
             data = await storage.download_file(row.file_url)
+        except ObjectNotFoundError:
+            logger.warning(
+                f"Attached file {row.id} ({name}) is not in storage; it will be absent from /app/data"
+            )
+            missing.append(name)
+            continue
         except StorageError:
             logger.exception(f"Could not stage file {row.id}; it will be absent from /app/data")
+            missing.append(name)
             continue
-        name = _attachment_name(row.filename, row.id, used)
         used.add(name)
         names.append(name)
         (staging / name).write_bytes(data)
-    return staging, names
+    return staging, names, missing
 
 
-def _open_session(
-    workspace_id: str, validated: ValidatedAgent, data_dir: str | None
-) -> tuple[SandboxSession, int]:
-    """The run's sandbox, plus the megabytes reserved for it (0 when there is nothing
-    to reserve). Callers must `release` the returned amount in their teardown.
+def _sandbox_config(validated: ValidatedAgent) -> tuple[SandboxConfig, int]:
+    """The run's sandbox size and the megabytes it must reserve (0 when there is
+    nothing to reserve).
 
     A run with no attached files keeps the configured size: there is nothing to read,
     so the tool-only tier is right and the budget is not touched.
     """
     config = SandboxConfig.from_settings()
-    reserved_mb = 0
     if validated.attached_documents:
         largest = max((row.file_size or 0) for row in validated.attached_documents)
         config = config.tiered(largest)
-        if not reserve(workspace_id, config.memory_mb):
-            raise AgentRuntimeError(
-                "This workspace has too many sandbox runs in flight; try again when one finishes."
-            )
-        reserved_mb = config.memory_mb
-    session = SandboxSession(
+        return config, config.memory_mb
+    return config, 0
+
+
+def _make_session(
+    config: SandboxConfig, validated: ValidatedAgent, data_dir: str | None
+) -> SandboxSession:
+    return SandboxSession(
         config=config,
         data_dir=data_dir,
         tools=InMemoryToolSource({row.name: row.code for row in validated.workspace_tools}),
     )
-    return session, reserved_mb
+
+
+def _plan_slot(
+    workspace_id: str, validated: ValidatedAgent
+) -> tuple[SandboxConfig, SlotRequest | None]:
+    """Size the sandbox and, when it needs memory, the request that waits for it."""
+    config, reserved_mb = _sandbox_config(validated)
+    return config, (SlotRequest(workspace_id, reserved_mb) if reserved_mb else None)
+
+
+def _open_session(
+    workspace_id: str, validated: ValidatedAgent, data_dir: str | None
+) -> tuple[SandboxSession, int]:
+    """A subagent's sandbox plus the megabytes reserved for it (release them in
+    teardown). It tries once and raises `SandboxBusy` when the budget is full: its
+    parent already holds memory, so waiting here could deadlock until the deadline."""
+    config, reserved_mb = _sandbox_config(validated)
+    if reserved_mb and not reserve(workspace_id, reserved_mb):
+        raise SandboxBusy(MIN_RETRY_AFTER_S, "queue_full")
+    return _make_session(config, validated, data_dir), reserved_mb
 
 
 def _subagent_runner(workspace_id: str, child_id: str, depth: int):
@@ -483,14 +554,27 @@ def _subagent_runner(workspace_id: str, child_id: str, depth: int):
                     return "That subagent no longer exists."
                 data = await saved_input(db, child)
                 validated = await validate_agent(db, workspace_id, data, agent_id=child.id)
-                staging, filenames = await _stage_files(validated.attached_documents)
+                staging, filenames, missing_files = await _stage_files(
+                    validated.attached_documents
+                )
                 session, reserved_mb = _open_session(
                     workspace_id, validated, str(staging) if staging else None
                 )
+                unavailable: list[str] = [
+                    f"File {name} (not found in storage)" for name in missing_files
+                ]
                 tools = await build_tools(
-                    db, workspace_id, validated, session, depth=depth, filenames=filenames
+                    db,
+                    workspace_id,
+                    validated,
+                    session,
+                    depth=depth,
+                    filenames=filenames,
+                    unavailable=unavailable,
                 )
-                graph = build_graph(validated, child, tools, streaming=False)
+                graph = build_graph(
+                    validated, child, tools, streaming=False, unavailable=unavailable
+                )
             result = await graph.ainvoke({"messages": [HumanMessage(content=task)]})
             return _message_text(result.get("messages", [])[-1]) or "(the subagent returned no answer)"
         finally:
@@ -657,6 +741,24 @@ async def _delete_assistant_message(assistant_message_id: str) -> None:
             await db.commit()
 
 
+async def _discard_refused_turn(
+    user_message_id: str | None, session_id: str, *, drop_session: bool
+) -> None:
+    """A refused (429) turn leaves nothing behind, so the client's retry does
+    not store the user message twice. Short session; none is held while queued."""
+    async with async_session() as db:
+        if user_message_id is not None:
+            row = await db.get(ChatMessage, user_message_id)
+            if row is not None:
+                await db.delete(row)
+        if drop_session:
+            await db.flush()
+            session_row = await db.get(ChatSession, session_id)
+            if session_row is not None:
+                await db.delete(session_row)
+        await db.commit()
+
+
 async def _flush_activity(assistant_message_id: str, activity: list[dict]) -> None:
     """Persist the activity seen so far, without touching status/content.
 
@@ -682,6 +784,7 @@ async def stream_turn(
     output_format: str = DEFAULT_OUTPUT_FORMAT,
     *,
     emit_content_reset: bool = False,
+    session_created_by_turn: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one playground turn (spec §6-7): persist both messages, stream the
     v2 protocol, and keep the assistant row's activity log identical to what
@@ -693,12 +796,19 @@ async def stream_turn(
     started = time.monotonic()
     sandbox: Any | None = None
     staging: Path | None = None
-    reserved_mb = 0
+    slot: SlotRequest | None = None
 
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
     activity: list[dict[str, Any]] = []
-    tool_started: dict[str, float] = {}
+    # One entry per in-flight tool call. ToolRetryMiddleware re-runs a failing
+    # tool inside the same call; each attempt streams its own run_id but all
+    # share langgraph_checkpoint_ns (the tool_call_id only appears on the
+    # end/error events, not the start). Keying by the ns keeps one card.
+    tool_calls: dict[str, dict[str, Any]] = {}
+    # A failed attempt is held back: it is only the call's real end if no
+    # retry start for the same call follows.
+    pending_errors: dict[str, dict[str, Any]] = {}
     usage = new_usage()
     model_snapshot: tuple[str, str] | None = None
     ttft_ms: int | None = None
@@ -708,6 +818,31 @@ async def stream_turn(
     def _remember(event: dict[str, Any]) -> None:
         if len(activity) < ACTIVITY_EVENT_CAP:
             activity.append(event)
+
+    def _tool_key(event: dict[str, Any]) -> str:
+        ns = str((event.get("metadata") or {}).get("langgraph_checkpoint_ns", ""))
+        return ns or str(event.get("run_id") or event.get("name", ""))
+
+    def _finish_tool(key: str, entry: dict[str, Any]) -> dict[str, Any]:
+        call = tool_calls.pop(key, None)
+        if call is None:
+            # End without a seen start: keep the event's own run_id.
+            call = {"id": entry["id"], "started": None, "attempts": 1}
+        entry["id"] = call["id"]
+        entry["duration_ms"] = (
+            int((time.monotonic() - call["started"]) * 1000) if call["started"] else None
+        )
+        if call["attempts"] > 1:
+            entry["attempts"] = call["attempts"]
+        _remember(entry)
+        return entry
+
+    def _release_pending(only: str | None = None) -> list[dict[str, Any]]:
+        if only is None:
+            keys = list(pending_errors)
+        else:
+            keys = [only] if only in pending_errors else []
+        return [_finish_tool(key, pending_errors.pop(key)) for key in keys]
 
     try:
         async with async_session() as db:
@@ -771,18 +906,14 @@ async def stream_turn(
                 output_format,
                 validated.profile.context_window if validated.profile else None,
             )
-            staging, filenames = await _stage_files(validated.attached_documents)
-            sandbox, reserved_mb = _open_session(
-                workspace_id, validated, str(staging) if staging else None
+            staging, filenames, missing_files = await _stage_files(
+                validated.attached_documents
             )
-            tools = await build_tools(
-                db, workspace_id, validated, sandbox, depth=0, filenames=filenames
-            )
-            graph = build_graph(
-                validated, agent, tools, streaming=True, output_format=output_format
-            )
+            sandbox_config, slot = _plan_slot(workspace_id, validated)
+            unavailable: list[str] = [
+                f"File {name} (not found in storage)" for name in missing_files
+            ]
             model_snapshot = (validated.profile.provider, validated.profile.model_id)
-            await _bump_run_usage(db, workspace_id, validated)
             await db.commit()
 
         yield {
@@ -793,11 +924,51 @@ async def stream_turn(
             },
         }
 
+        # Wait for sandbox memory with no DB session open: up to 20 queued runs
+        # would otherwise each pin a pooled connection for minutes.
+        if slot is not None:
+            waiting = slot.wait()
+            try:
+                async for position in waiting:
+                    yield {"event": "queued", "data": {"position": position}}
+            finally:
+                await waiting.aclose()
+
+        async with async_session() as db:
+            sandbox = _make_session(
+                sandbox_config, validated, str(staging) if staging else None
+            )
+            tools = await build_tools(
+                db,
+                workspace_id,
+                validated,
+                sandbox,
+                depth=0,
+                filenames=filenames,
+                unavailable=unavailable,
+            )
+            graph = build_graph(
+                validated,
+                agent,
+                tools,
+                streaming=True,
+                output_format=output_format,
+                unavailable=unavailable,
+            )
+            await _bump_run_usage(db, workspace_id, validated)
+            await db.commit()
+
         if filenames:
             staged_event: dict[str, Any] = {"type": "files_staged", "names": list(filenames)}
             _remember(staged_event)
             await _flush_activity(assistant_message_id, activity)
             yield {"event": "activity", "data": staged_event}
+
+        if unavailable:
+            unavailable_event: dict[str, Any] = {"type": "unavailable", "names": list(unavailable)}
+            _remember(unavailable_event)
+            await _flush_activity(assistant_message_id, activity)
+            yield {"event": "activity", "data": unavailable_event}
 
         history = [
             HumanMessage(content=row.content)
@@ -817,6 +988,22 @@ async def stream_turn(
             kind = event["event"]
             metadata = event.get("metadata") or {}
             nested = "|" in str(metadata.get("langgraph_checkpoint_ns", ""))
+
+            if pending_errors and not nested:
+                # Parallel calls each run in their own tools:<id> namespace and
+                # a sibling's events must not end this call's retry window.
+                # Release a held error only when proof arrives that its call is
+                # over: its own tools node ended, or the model node took over.
+                ns = str(metadata.get("langgraph_checkpoint_ns", ""))
+                if kind == "on_chain_end" and event.get("name") == "tools":
+                    to_release = _release_pending(ns)
+                elif kind.startswith("on_chat_model") or ns.startswith("model:"):
+                    to_release = _release_pending()
+                else:
+                    to_release = []
+                for released in to_release:
+                    await _flush_activity(assistant_message_id, activity)
+                    yield {"event": "activity", "data": released}
 
             if kind == "on_chat_model_stream" and not nested:
                 chunk = event["data"].get("chunk")
@@ -846,7 +1033,17 @@ async def stream_turn(
                     content_parts.clear()
                     yield {"event": "content_reset", "data": {}}
                 run_id = str(event.get("run_id") or event.get("name", ""))
-                tool_started[run_id] = time.monotonic()
+                key = _tool_key(event)
+                if key in tool_calls:
+                    # A retry of a call that already has a card.
+                    tool_calls[key]["attempts"] += 1
+                    pending_errors.pop(key, None)
+                    continue
+                tool_calls[key] = {
+                    "id": run_id,
+                    "started": time.monotonic(),
+                    "attempts": 1,
+                }
                 name = event.get("name", "")
                 entry = {
                     "type": "tool_start",
@@ -862,44 +1059,39 @@ async def stream_turn(
                 yield {"event": "activity", "data": entry}
 
             elif kind == "on_tool_end" and not nested:
-                run_id = str(event.get("run_id") or event.get("name", ""))
                 name = event.get("name", "")
-                started_at = tool_started.pop(run_id, None)
-                duration_ms = (
-                    int((time.monotonic() - started_at) * 1000) if started_at else None
+                key = _tool_key(event)
+                pending_errors.pop(key, None)
+                entry = _finish_tool(
+                    key,
+                    {
+                        "type": "tool_end",
+                        "id": str(event.get("run_id") or name),
+                        "name": name,
+                        "kind": _tool_kind(name),
+                        "result": _cap(event["data"].get("output")),
+                    },
                 )
-                entry = {
-                    "type": "tool_end",
-                    "id": run_id,
-                    "name": name,
-                    "kind": _tool_kind(name),
-                    "result": _cap(event["data"].get("output")),
-                    "duration_ms": duration_ms,
-                }
-                _remember(entry)
                 await _flush_activity(assistant_message_id, activity)
                 yield {"event": "activity", "data": entry}
 
             elif kind == "on_tool_error" and not nested:
                 # LangGraph emits this instead of on_tool_end when the tool
                 # raises; without it the card would say "Calling…" forever.
-                run_id = str(event.get("run_id") or event.get("name", ""))
+                # Held back until we know no retry follows (see above).
                 name = event.get("name", "")
-                started_at = tool_started.pop(run_id, None)
-                duration_ms = (
-                    int((time.monotonic() - started_at) * 1000) if started_at else None
-                )
-                entry = {
+                key = _tool_key(event)
+                pending_errors[key] = {
                     "type": "tool_end",
-                    "id": run_id,
+                    "id": str(event.get("run_id") or name),
                     "name": name,
                     "kind": _tool_kind(name),
-                    "error": _cap(str(event["data"].get("error") or "the tool failed")),
-                    "duration_ms": duration_ms,
+                    "error": _cap(
+                        short_message(
+                            Exception(str(event["data"].get("error") or "the tool failed"))
+                        )
+                    ),
                 }
-                _remember(entry)
-                await _flush_activity(assistant_message_id, activity)
-                yield {"event": "activity", "data": entry}
 
             elif (
                 kind == "on_chain_end"
@@ -912,6 +1104,9 @@ async def stream_turn(
                     if final_messages:
                         final_text = _message_text(final_messages[-1])
                     structured = output.get("structured_response")
+
+        for released in _release_pending():
+            yield {"event": "activity", "data": released}
 
         text = final_text or "".join(content_parts)
         if not streamed and text:
@@ -948,6 +1143,7 @@ async def stream_turn(
         # Stop button (P8): whatever streamed so far stays, marked stopped.
         # A disconnect before the rows were even created must still cancel the
         # execution — otherwise the row is stuck at "running" forever.
+        _release_pending()
         if assistant_message_id is not None:
             partial = "".join(content_parts)
             await _write_assistant_message(
@@ -993,8 +1189,36 @@ async def stream_turn(
             await _delete_assistant_message(assistant_message_id)
         yield {"event": "error", "data": {"detail": detail}}
 
+    except SandboxBusy as exc:
+        # Expected under load, not a bug: no traceback.
+        detail = str(exc)
+        logger.warning(f"Playground turn {execution_id} refused: sandbox busy ({exc.reason})")
+        _release_pending()
+        await _mark_execution(
+            execution_id,
+            "failed",
+            error=detail,
+            started=started,
+            model=model_snapshot,
+            ttft_ms=ttft_ms,
+        )
+        if assistant_message_id is not None:
+            await _delete_assistant_message(assistant_message_id)
+        await _discard_refused_turn(
+            user_message_id, session_id, drop_session=session_created_by_turn
+        )
+        yield {
+            "event": "error",
+            "data": {
+                "detail": detail,
+                "code": "sandbox_busy",
+                "retry_after_s": exc.retry_after_s,
+            },
+        }
+
     except Exception as exc:
         logger.exception(f"Playground turn {execution_id} failed")
+        _release_pending()
         detail = str(exc).strip().replace("\n", " ") or exc.__class__.__name__
         await _mark_execution(
             execution_id,
@@ -1025,8 +1249,8 @@ async def stream_turn(
                 await asyncio.to_thread(sandbox.close)
         finally:
             try:
-                if reserved_mb:
-                    release(workspace_id, reserved_mb)
+                if slot is not None:
+                    slot.release()
             finally:
                 if staging is not None:
                     shutil.rmtree(staging, ignore_errors=True)
