@@ -25,7 +25,7 @@ description: Map of the local-only docs/ tree (plans, specs, ADRs, manuals, runb
 
 ## Tracked deployment files
 
-`deployment.md`, `render.yaml`, `backend/deploy/`, and `docker/` are tracked and describe the live setup.
+`deployment.md`, `render.yaml`, `backend/deploy/`, and `docker/` are tracked. `deployment.md`, `render.yaml` and `backend/deploy/` describe the earlier repository's deployment; this repository is not deployed.
 
 ## Guidance
 

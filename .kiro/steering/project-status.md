@@ -16,17 +16,17 @@ The earlier Phase 3 design specs were voided by the owner. They are research rec
 
 ## Shipped
 
-Sessions, PostgreSQL-only, structured outputs, LLM profiles, prompt token counts, repo hygiene guards, workspaces, legacy workflows and engine, executions, auth/RBAC, tools, skills, seed script, connectors, file library (replaced the original Knowledge Base), data sources (Postgres, MySQL, MongoDB find-only), Docker sandbox, agents, Playground, API keys with public `/v1`, remote sandbox host, Render deployment with object storage, and cloud file import (OneDrive OAuth per user, Google Picker) through one `import_document()` path.
+Sessions, PostgreSQL-only, structured outputs, LLM profiles, prompt token counts, repo hygiene guards, workspaces, legacy workflows and engine, executions, auth/RBAC, tools, skills, seed script, connectors, file library (replaced the original Knowledge Base), data sources (Postgres, MySQL, MongoDB find-only), Docker sandbox, agents, Playground, API keys with public `/v1`, remote sandbox host (InstaBox daemon), S3-compatible object storage, Render deployment config (used by the earlier repository; this one is not deployed), and cloud file import (OneDrive OAuth per user, Google Picker) through one `import_document()` path.
 
 ## Activity dashboard, Activity Logs, key agent access
 
-Built and verified in a browser against a scratch database: dashboard as home, empty and populated states, logs with detail drawer and sessions, shared filters held in the URL, key Activity and Logs buttons, per-key agent access (create, edit after use, enforcement on `/v1`). The schema change for this work is a migration that adds execution telemetry columns, `api_keys.all_agents`, and `api_key_agents`. It is applied to the Neon database used locally. It is NOT applied to the Supabase database Render uses; the next Render deploy applies it at boot.
+Built and verified in a browser against a scratch database: dashboard as home, empty and populated states, logs with detail drawer and sessions, shared filters held in the URL, key Activity and Logs buttons, per-key agent access (create, edit after use, enforcement on `/v1`). The schema change for this work is a migration that adds execution telemetry columns, `api_keys.all_agents`, and `api_key_agents`. It is applied to the Neon database.
 
 Not built: Trends and Explore tabs, Guardrails, live mode, export, reasoning tokens shown unless a model reports them.
 
 ## Playground output formats (Markdown and OpenUI)
 
-Built and verified in a browser against a scratch database with a stub OpenAI-compatible model. Replies render as GitHub-flavoured Markdown for every model. OpenUI (thesysdev OpenUI Lang, React renderer) is offered when the agent's LLM profile has a stored context window of at least 200,000 tokens (model-card value for known models, user-typed for custom ones). The choice is per turn, held in page state; the reply's format is stored on `chat_messages.output_format` (NULL reads as Markdown). That column comes from a migration applied to Neon but NOT to Supabase (Render); the next Render deploy applies it at boot. The public `/v1` API is unchanged and always Markdown.
+Built and verified in a browser against a scratch database with a stub OpenAI-compatible model. Replies render as GitHub-flavoured Markdown for every model. OpenUI (thesysdev OpenUI Lang, React renderer) is offered when the agent's LLM profile has a stored context window of at least 200,000 tokens (model-card value for known models, user-typed for custom ones). The choice is per turn, held in page state; the reply's format is stored on `chat_messages.output_format` (NULL reads as Markdown). That column comes from a migration applied to Neon. The public `/v1` API is unchanged and always Markdown.
 
 Not verified against real providers yet: how reliably each model writes valid OpenUI.
 
@@ -38,7 +38,7 @@ A failing tool or component does not end a run: transient tool errors are retrie
 
 - A tool card that failed on every attempt reads "Called X after N attempts"; only its red icon marks the failure.
 - If the cleanup write after a busy refusal fails, the client does not receive the `sandbox_busy` event.
-- Three documents copied from Supabase into Neon have no bytes in Neon storage (they exist only in Render's B2 bucket). Runs that attach them report them as unavailable.
+- Three documents copied from the earlier repository's Supabase into Neon have no bytes in Neon storage (they exist only in that deployment's B2 bucket). Runs that attach them report them as unavailable.
 - The Playground's waiting line can linger briefly after Stop or an early error until the session refetches.
 - The sandbox queue is in-process; with several API workers each has its own queue.
 - The public `/v1` buffered response concatenates text from every model step, including narration before a tool call; the persisted message keeps only the final step.
@@ -55,8 +55,10 @@ A failing tool or component does not end a run: transient tool errors are retrie
 
 No pending decisions. Do not re-propose the voided specs. Do not invent API-exposure directions; ask.
 
-## Deployment summary
+## Deployment and database
 
-Frontend: Render static site. API: Render free web service (sleeps when idle, kept warm by a health ping). Database: Supabase Postgres via session pooler (asyncpg; the transaction pooler breaks prepared statements). Uploads: Backblaze B2 via S3 settings. Sandbox: a daemon on an InstaBox VM reusing `DockerBackend` and `kernel.py`, reached by `InstaboxBackend` over HTTP with HMAC signing. Render's start command runs migrations on boot with `ALLOW_REMOTE_MIGRATIONS=1`. No secrets belong in the repo; they live in Render, local `.env`, and the VM env file. See `deployment.md` at the repo root and `backend/deploy/`.
+This repository has no deployment. Pushing it deploys nothing.
 
-Neon: a Neon project (`mokinjay-sg`, region AWS Singapore `aws-ap-southeast-1`, branch `main`; `neon.ts`: Postgres, an `assets` Object Storage bucket, a starter `hello` function) is wired for local use, in the same region as the Render backend. The repo-root `.env` points at it, and it is at the latest migration; Supabase is two migrations behind (activity telemetry, chat output format). The Render deployment is unchanged and still uses Supabase.
+Database and storage: a Neon project (`mokinjay-sg`, region AWS Singapore `aws-ap-southeast-1`, branch `main`; `neon.ts`: Postgres, an `assets` Object Storage bucket, a starter `hello` function). The repo-root `.env` points at it, and it is at the latest migration. It holds a one-time copy of the earlier repository's Supabase data; Supabase is left untouched.
+
+`deployment.md`, `render.yaml` and `backend/deploy/` record how the earlier Mokinjay repository was deployed (Render static site and API, Supabase Postgres via session pooler, Backblaze B2 uploads, a sandbox daemon on an InstaBox VM reached by `InstaboxBackend` over HMAC-signed HTTP). They are reference for a future deployment of this repository, not a live setup. No secrets belong in the repo.

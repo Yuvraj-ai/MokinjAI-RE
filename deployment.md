@@ -1,6 +1,12 @@
-# Deployment record — Mokinjay demo
+# Deployment record — Mokinjay demo (earlier repository)
 
-**Status:** live and verified — core flow, cloud imports and sandbox execution work end to end.
+> **This repository has no deployment.** This file records how the user's *earlier*
+> Mokinjay repository was deployed (Render, Supabase, Backblaze B2, InstaBox). It is
+> kept as reference for a future deployment of this repository. Nothing here runs from
+> this repository, and pushing this repository deploys nothing. This repository's
+> database is Neon (see the repo-root `.env` and `neon.ts`).
+
+**Status (earlier repository):** live and verified — core flow, cloud imports and sandbox execution work end to end.
 **Last updated:** 2026-11-20.
 **Decision record:** `docs/guides/deployment-architecture.md` (local-only, authoritative for *why*).
 **Runbooks:** `docs/guides/deploy-render.md`, `backend/deploy/README-sandbox-daemon.md`.
@@ -39,12 +45,8 @@ first deployed commit `ff7ceff`.
 ## 3. Database
 
 - Provider: Supabase, `postgresql+asyncpg://`, **session pooler** host, port `5432`.
-- Supabase is at Alembic revision **`9a1c2e3f4b5c`** (`cloud_connections` + `documents.source_*`);
-  `alembic current` confirms it. The code's head is `b4e8f6d2c0a3`: two newer migrations
-  (`a3d7e5c1b9f2` activity telemetry and key agent access, `b4e8f6d2c0a3` chat output format)
-  apply automatically at the next Render boot after the code is pushed.
-- Local development uses a separate Neon database (repo-root `.env`), already at head.
-  Supabase data was copied into it read-only; Supabase itself is unchanged.
+- Supabase is at Alembic revision **`9a1c2e3f4b5c`** (`cloud_connections` + `documents.source_*`),
+  applied on 2026-11-18; `alembic current` confirmed it.
 - Render's start command runs `ALLOW_REMOTE_MIGRATIONS=1 python -m alembic upgrade head`
   on every boot because the free plan has no pre-deploy hook.
 - Existing data: 3 users, 1 superuser. Login works with an existing account.

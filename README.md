@@ -36,7 +36,7 @@ Mokinjay is an **AI agent platform as a service**. Users build customized AI age
 | **Frontend** | React 19, TypeScript, Vite, Zustand, TanStack Query, React Router 7, Tailwind CSS 3, CodeMirror 6, React Flow (legacy canvas), Vitest |
 | **Backend** | Python 3.12+, FastAPI, SQLAlchemy 2 (async, asyncpg), Pydantic v2, Alembic |
 | **LLM layer** | LangChain 1.x and LangGraph, `langchain-openai/anthropic/google-genai`, `langchain-mcp-adapters`, `langchain-exa`, `langchain-tavily` |
-| **Database** | PostgreSQL only (local, Neon or Supabase) |
+| **Database** | PostgreSQL only (Neon for this repository; any local PostgreSQL for tests and scratch work) |
 | **Sandbox** | Docker container per run (no network, read-only root, non-root), subprocess fallback, or a remote sandbox daemon |
 | **Storage** | Local filesystem or any S3-compatible bucket (Backblaze B2, Neon Object Storage) |
 | **Queue / cache** | Redis (public API rate limiter); Celery only for the legacy canvas path |
@@ -71,8 +71,8 @@ mokinjay project/
 │   ├── store/  lib/  hooks/  types/
 ├── docker/                  # Dockerfile.backend, Dockerfile.frontend, Dockerfile.sandbox
 ├── neon.ts, hello.ts        # Neon config (Postgres, object storage bucket, starter function)
-├── render.yaml              # Render blueprint (API + static frontend)
-├── deployment.md            # Record of the live deployment
+├── render.yaml              # Render blueprint kept from the earlier repository (not deployed)
+├── deployment.md            # How the earlier repository was deployed; reference only
 ├── run_mokinjay.sh          # One-command local start
 └── .env.example             # Environment template
 ```

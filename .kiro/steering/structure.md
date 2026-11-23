@@ -65,9 +65,9 @@ frontend/src/
 docker/              Dockerfile.backend, Dockerfile.frontend, Dockerfile.sandbox
 scripts/             generate_fernet_key.py, generate_jwt_secret.py
 run_mokinjay.sh      one-command local start (Redis, backend, Celery worker, frontend)
-render.yaml          Render blueprint (API web service + static frontend)
+render.yaml          Render blueprint from the earlier repository's deployment (this repository is not deployed)
 neon.ts, hello.ts    Neon infrastructure config (Postgres, `assets` bucket, starter `hello` function); root package.json holds its tooling
-deployment.md        deployment record (committed)
+deployment.md        how the earlier repository was deployed (reference only)
 docs/                LOCAL-ONLY, gitignored (plans, specs, ADRs, manuals). Never push.
 memory.md            local-only agent memory file (gitignored)
 ```

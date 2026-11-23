@@ -16,8 +16,8 @@ inclusion: always
 ## Git and docs hygiene
 
 - **Commit as you go, one logical change per commit** (a feature, a bug fix, a docs update), each with a clear message. Do not batch unrelated work. Do not push without being asked.
-- **Never run migrations against a hosted database without explicit approval.** There are two: Neon (the repo-root `.env`, used for local development) and Supabase (used by the Render deployment, whose service runs `alembic upgrade head` on every boot, so a migration applied ahead of a code deploy can stop the old code from starting). Verify schema changes on a scratch local database; migrate hosted only when told.
-- Pushing `main` can trigger a Render deploy (Render auto-deploys by default), which migrates Supabase at boot. Do not push without being asked.
+- **Never run migrations against the hosted Neon database (the repo-root `.env`) without explicit approval.** Verify schema changes on a scratch local database; migrate Neon only when told. The earlier repository's Supabase database is read-only reference: never write to it.
+- This repository has no deployment; a push deploys nothing. Still do not push without being asked.
 - Reverting a hosted migration is also a hosted change: ask first.
 
 - `docs/` is gitignored and local-only by the owner's request. Never force-add it.
