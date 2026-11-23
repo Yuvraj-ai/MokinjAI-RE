@@ -39,8 +39,12 @@ first deployed commit `ff7ceff`.
 ## 3. Database
 
 - Provider: Supabase, `postgresql+asyncpg://`, **session pooler** host, port `5432`.
-- Current Alembic head: **`9a1c2e3f4b5c`** (`cloud_connections` + `documents.source_*`).
-  Applied to Supabase on 2026-11-18; `alembic current` confirms it.
+- Supabase is at Alembic revision **`9a1c2e3f4b5c`** (`cloud_connections` + `documents.source_*`);
+  `alembic current` confirms it. The code's head is `b4e8f6d2c0a3`: two newer migrations
+  (`a3d7e5c1b9f2` activity telemetry and key agent access, `b4e8f6d2c0a3` chat output format)
+  apply automatically at the next Render boot after the code is pushed.
+- Local development uses a separate Neon database (repo-root `.env`), already at head.
+  Supabase data was copied into it read-only; Supabase itself is unchanged.
 - Render's start command runs `ALLOW_REMOTE_MIGRATIONS=1 python -m alembic upgrade head`
   on every boot because the free plan has no pre-deploy hook.
 - Existing data: 3 users, 1 superuser. Login works with an existing account.

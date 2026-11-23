@@ -11,6 +11,8 @@ backend/
     config.py          Pydantic Settings (repo-root .env)
     crypto.py          Fernet helpers (LLM keys, connector secrets, DB URIs)
     database.py        async engine/session
+    db_url.py          normalises libpq/Neon URLs for asyncpg (pooler hosts get no prepared-statement cache)
+    logging.py         app logging (backend/logs/applog.log, daily rotation; the test suite writes there too)
     models/            agent, api_key, chat, cloud_connection, connector, execution, external_database,
                        knowledge (file folders + documents), llm_profile, prompt, resource_usage,
                        search_credential, session, skill, structured_output, tool, user, workflow, workspace
@@ -27,19 +29,21 @@ backend/
     utils/             security helpers, errors, tokens (tiktoken)
   services (selected):
     agent_runtime / agent_composition / agent_capabilities / agent_tools / agent_validation / agent_dependencies
+    agent_resilience (tool retry/error/failure-limit middleware, ToolTimeoutError, queue limits)
     structured_output (pure compiler, no DB)   skill (compiler)   tool_schema (AST extraction)
     connector_catalog / connector_runtime      web_search         model_profiles / llm_probe
     api_keys (incl. agent access) / public_limits   sessions / otp_store / telegram / seed
     activity (dashboard + logs aggregations over executions)
     output_formats (Markdown/OpenUI eligibility, threshold, committed openui_prompt.txt)
-    sandbox/       kernel.py (stdlib-only), protocol, backends (Docker, Subprocess, Instabox), session, budget, daemon/
+    sandbox/       kernel.py (stdlib-only), protocol, backends (Docker, Subprocess, Instabox), session,
+                   budget (per-workspace memory budget + FIFO wait queue, SlotRequest, SandboxBusy), daemon/
     data_sources/  guard (sqlglot), mongo_guard, postgres, mysql, mongo, ssrf, schema_cache
     storage/       base, filesystem, s3
     document_import / google_drive / onedrive / cloud_connections / uploads
   alembic/versions/  linear migration chain
-  unit_tests/        ~90 test files (pytest)
+  unit_tests/        ~97 test files (pytest); fakes.py holds ScriptedChatModel for tool-calling tests
   deploy/            sandbox daemon systemd unit and env examples, Render env example
-  seed.py, create_user.py, run_mokinjay.py
+  seed.py, create_user.py
 
 frontend/src/
   App.tsx            route tree
@@ -47,16 +51,22 @@ frontend/src/
   pages/             Activity (dashboard), ActivityLogs, Agents, Playground, ApiKeys(+Detail), Dashboard(workflows), WorkflowEditor,
                      ExecutionHistory (retired, replaced by ActivityLogs, kept unrouted),
                      Prompts, StructuredOutputs, Files, DataSources, Skills, LlmProfiles, Tools, Connectors, Login
-  components/        agents/ (config dialog, pickers), flow/ (legacy canvas), execution/, auth/, layout/, dashboard/
+  components/        agents/ (config dialog, pickers), activity/, apikeys/, files/, skills/, structured-output/,
+                     tools/ (CodeMirror editor), ui/ (shared primitives, Spinner, Badge), flow/ (legacy canvas),
+                     execution/, auth/, layout/, dashboard/ (legacy workflow list)
   store/             Zustand (auth, workflow, execution, theme)
-  lib/               activityFilters (URL-held filter state), chartColors, format, agentAccess, outputFormat
-  components/playground/  ThreadPane, AgentResponseRenderer (Markdown | lazy OpenUI, Raw/Rendered), MarkdownRenderer,
+  lib/               activityFilters (URL-held filter state), chartColors, format, agentAccess, outputFormat,
+                     googlePicker, constants, utils
+  components/playground/  ThreadPane (live stream, queued line), ActivityCard (tool cards with attempts,
+                     unavailable card), AgentResponseRenderer (Markdown | lazy OpenUI, Raw/Rendered), MarkdownRenderer,
                      OutputFormatSelector, RenderBoundary, openui/ (library, inspect, renderer, prompt drift test)
   hooks/ types/
 
 docker/              Dockerfile.backend, Dockerfile.frontend, Dockerfile.sandbox
 scripts/             generate_fernet_key.py, generate_jwt_secret.py
+run_mokinjay.sh      one-command local start (Redis, backend, Celery worker, frontend)
 render.yaml          Render blueprint (API web service + static frontend)
+neon.ts, hello.ts    Neon infrastructure config (Postgres, `assets` bucket, starter `hello` function); root package.json holds its tooling
 deployment.md        deployment record (committed)
 docs/                LOCAL-ONLY, gitignored (plans, specs, ADRs, manuals). Never push.
 memory.md            local-only agent memory file (gitignored)

@@ -371,8 +371,8 @@ export default function FilesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-8 text-sm text-ink-muted">
-        <Spinner /> Loading files…
+      <div className="flex items-center justify-center p-12">
+        <Spinner className="w-6 h-6" />
       </div>
     )
   }

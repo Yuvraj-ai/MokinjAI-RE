@@ -1,38 +1,46 @@
 # Project Mokinjay — AI Agent Platform as a Service
 
-Mokinjay is an **AI agent platform as a service**. Users build highly customized AI agents by combining resources from a built-in library — system prompts, structured outputs, LLM profiles, tools, connectors, skills, and files — then expose each agent as an API endpoint with its own API key. External applications — chatbots, CRMs, dashboards, any app without an AI stack — call that endpoint to get AI features (chat, structured output, tool execution, file analysis) without building an AI solution themselves.
+Mokinjay is an **AI agent platform as a service**. Users build customized AI agents from a per-workspace resource library (system prompts, LLM profiles, structured outputs, tools, skills, connectors, files and data sources), then expose each agent as an API endpoint. External applications such as chatbots, CRMs and dashboards call that endpoint with an API key and get AI features without building an AI stack.
 
-**The agent is the product.** The resource library feeds agent construction; API exposure is the delivery mechanism. The visual workflow editor (canvas) is a legacy feature kept from before this goal was clarified.
+**The agent is the product.** The resource library feeds agent construction, and API exposure is the delivery mechanism. The Playground exists to test agents. The visual workflow canvas is a legacy feature, kept working but no longer developed.
 
-**Flow: Build agent → expose endpoint → external app calls it with API key.**
+**Flow: build an agent → expose it with an API key → an external app calls it.**
 
 ## What It Does
 
-- **Resource Library** — Prompts, structured outputs, LLM profiles, tools, connectors, skills, and files, managed per workspace
-- **Multi-Provider LLM Support** — OpenAI, Anthropic, and Gemini profiles, verified before use with encrypted API keys
-- **Structured Outputs** — Reusable JSON-Schema definitions with `@Reference` nesting, compiled on demand
-- **Tools & Skills** — Built-in and user-defined Python tools run in an isolated Docker sandbox; markdown skill packs with progressive disclosure
-- **Connectors** — Predefined catalog (Slack, GitHub, Notion, PostgreSQL, …) loaded as MCP tools at runtime
-- **Files** — Workspace file library (flat folders, loose files) attached to agents; PDF/DOCX/XLSX/CSV are read by sandboxed Python, not a fixed extraction pipeline
-- **Data Sources** — External database connections (PostgreSQL, MySQL, MongoDB, ChromaDB)
-- **Visual Workflow Editor (legacy)** — Drag-and-drop canvas for AI pipelines, still working from the earlier phase
-- **Workspaces & RBAC** — Multi-user workspaces with owner/admin/editor/viewer roles
-
-## Goal
-
-Deliver the full flow: **build an agent from the resource library → expose it as an API endpoint with an API key → let external apps call it.** The resource library and sandbox runtime are complete; agent creation, a chat tab for testing, and API exposure are the current frontier.
+- **Resource library** (per workspace)
+  - **System prompts** with exact token counts (tiktoken `o200k_base`).
+  - **LLM profiles** for OpenAI, Anthropic, Gemini or any OpenAI-compatible endpoint. Testing the connection is the save, and keys are Fernet-encrypted at rest.
+  - **Structured outputs**: field lists with `@Reference` composition, compiled to JSON Schema on read.
+  - **Tools**: built-in tools run in the backend. User-defined Python tools run in an isolated sandbox.
+  - **Skills**: Markdown packs with progressive disclosure. `@Skill` composes skills and `/Tool` attaches tools.
+  - **Connectors**: a predefined MCP catalog (Slack, GitHub, Notion, PostgreSQL, …). Users enable connectors; they do not write them.
+  - **Files**: a workspace file library (folders and loose files, 95 MiB uploads, OneDrive and Google Drive import). Sandboxed Python reads the files.
+  - **Data sources**: read-only external databases. PostgreSQL, MySQL and MongoDB are queryable. ChromaDB connections can be created but not queried yet.
+- **Agents** combine an LLM profile and its parameters, an optional structured output, optional web search (Exa, Tavily or provider-native), tools, skills, connectors, files, data sources and subagents.
+- **Fail-safe runs**
+  - Transient tool errors are retried.
+  - Other tool errors go back to the model.
+  - A component that fails to load is skipped and named to the model.
+  - When sandboxes are busy, runs wait in a short per-workspace queue instead of failing.
+- **Playground**: a chat for testing agents. It streams tool activity, and replies render as Markdown or OpenUI.
+- **Public API**: workspace-scoped `mk_...` keys with per-key agent access, rate limits and credit limits.
+- **Activity dashboard and logs**: requests, tokens, spend, latency, cache hits and every run, filterable by key, agent, source and model.
+- **Workspaces and RBAC**: owner, admin, editor and viewer roles. Admin login also works with a Telegram OTP.
+- **Workflow canvas (legacy)**: the original drag-and-drop pipeline editor.
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| **Frontend** | React 19, TypeScript, Vite 7, React Flow 12, Zustand, TanStack Query, Tailwind CSS 3 |
-| **Backend** | Python, FastAPI, SQLAlchemy 2.0 (async), Pydantic v2, Alembic |
-| **Database** | PostgreSQL 14+ |
-| **Queue** | Celery + Redis 7+ |
-| **Auth** | JWT (access + refresh tokens) |
-| **LLM** | OpenAI SDK, Anthropic SDK, Google Gemini |
-| **WebSocket** | FastAPI WebSocket + Redis pub/sub |
+| **Frontend** | React 19, TypeScript, Vite, Zustand, TanStack Query, React Router 7, Tailwind CSS 3, CodeMirror 6, React Flow (legacy canvas), Vitest |
+| **Backend** | Python 3.12+, FastAPI, SQLAlchemy 2 (async, asyncpg), Pydantic v2, Alembic |
+| **LLM layer** | LangChain 1.x and LangGraph, `langchain-openai/anthropic/google-genai`, `langchain-mcp-adapters`, `langchain-exa`, `langchain-tavily` |
+| **Database** | PostgreSQL only (local, Neon or Supabase) |
+| **Sandbox** | Docker container per run (no network, read-only root, non-root), subprocess fallback, or a remote sandbox daemon |
+| **Storage** | Local filesystem or any S3-compatible bucket (Backblaze B2, Neon Object Storage) |
+| **Queue / cache** | Redis (public API rate limiter); Celery only for the legacy canvas path |
+| **Auth** | JWT access and refresh tokens backed by a server-side `sessions` table |
 
 ## Project Structure
 
@@ -40,51 +48,33 @@ Deliver the full flow: **build an agent from the resource library → expose it 
 mokinjay project/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI application
-│   │   ├── config.py            # Environment configuration
-│   │   ├── database.py          # SQLAlchemy async engine
-│   │   ├── models/              # Database models (User, Workspace, Workflow, Execution, PromptTemplate, etc.)
-│   │   ├── schemas/             # Pydantic request/response schemas
-│   │   ├── routers/             # API routes (auth, workspaces, workflows, executions, files, prompts)
-│   │   ├── engine/              # Workflow execution engine
-│   │   │   ├── dag_builder.py   # Flow-to-DAG conversion, cycle detection, topological sort
-│   │   │   ├── executor.py      # Main execution loop with conditional branching
-│   │   │   ├── context.py       # Execution context (node outputs, trace, token tracking)
-│   │   │   └── modules/         # Node type implementations (agent, prompt, transform, etc.)
-│   │   ├── middleware/          # JWT auth + RBAC dependencies
-│   │   ├── workers/             # Celery background tasks
-│   │   ├── websocket/           # Real-time execution updates
-│   │   └── utils/               # Security helpers, error classes
-│   ├── alembic/                 # Database migrations
-│   ├── requirements.txt
-│   └── venv/
-├── frontend/
-│   ├── src/
-│   │   ├── api/                 # Axios API client with JWT interceptors (workflows, prompts, etc.)
-│   │   ├── components/
-│   │   │   ├── flow/            # Canvas, custom nodes (8 types), edges, sidebar, toolbar
-│   │   │   │   ├── nodes/       # BaseNode, AgentNode, PromptNode, InputNode, OutputNode, etc.
-│   │   │   │   ├── edges/       # CustomEdge with animated connections
-│   │   │   │   ├── sidebar/     # ModuleLibrary, PropertiesPanel, PromptLibrary, PromptCard, PromptEditor
-│   │   │   │   └── toolbar/     # CanvasToolbar with Save, Run, zoom, workflow name
-│   │   │   ├── execution/       # ExecutionPanel, ExecutionLog, ResultViewer
-│   │   │   ├── auth/            # LoginForm, AdminOTPLogin, ProtectedRoute
-│   │   │   ├── layout/          # AppLayout, Navbar (theme toggle), Sidebar (nav)
-│   │   │   └── dashboard/       # WorkflowList, WorkflowCard (rename, delete)
-│   │   ├── hooks/               # useAuth, useWorkflow, useExecution, useWebSocket
-│   │   ├── store/               # Zustand stores (auth, workflow, execution, theme)
-│   │   ├── pages/               # Login, Dashboard, WorkflowEditor, ExecutionHistory, Prompts
-│   │   ├── types/               # TypeScript interfaces
-│   │   └── lib/                 # Utilities, constants
-│   ├── tailwind.config.js       # Tailwind v3 with custom theme (cream, ink, accent colors)
-│   ├── package.json
-│   └── vite.config.ts
-├── docker/                      # Dockerfiles for backend & frontend
-├── docker-compose.yml           # Full stack orchestration
-├── run_mokinjay.sh              # One-command startup script
-├── clear-cache.sh               # Clear Vite cache and restart
-├── .env.example                 # Environment variable template
-└── .gitignore
+│   │   ├── main.py          # FastAPI app, routers, /health, public /v1 sub-app, WebSocket
+│   │   ├── config.py        # Settings, loaded from the repo-root .env
+│   │   ├── db_url.py        # Normalises libpq/Neon URLs for asyncpg
+│   │   ├── models/          # SQLAlchemy models
+│   │   ├── schemas/         # Pydantic request/response models
+│   │   ├── routers/         # Internal /api routes and the public /v1 routes
+│   │   ├── services/        # Agent runtime and resilience, composition, sandbox, data sources,
+│   │   │                    # storage, connectors, skills, structured outputs, API keys, activity
+│   │   ├── tools/           # Built-in @tool registry
+│   │   ├── middleware/      # Auth and RBAC dependencies
+│   │   ├── engine/          # Legacy workflow DAG executor
+│   │   └── workers/         # Celery tasks (legacy path)
+│   ├── alembic/versions/    # Linear migration chain
+│   ├── unit_tests/          # pytest suite
+│   ├── deploy/              # Sandbox daemon and Render env examples
+│   └── seed.py              # Admin user + Default workspace (idempotent)
+├── frontend/src/
+│   ├── pages/               # Dashboard (activity), Logs, Agents, Playground, API Keys, resource pages, Workflows
+│   ├── components/          # playground/, agents/, activity/, files/, tools/, ui/, flow/ (legacy), ...
+│   ├── api/                 # Axios wrappers per resource
+│   ├── store/  lib/  hooks/  types/
+├── docker/                  # Dockerfile.backend, Dockerfile.frontend, Dockerfile.sandbox
+├── neon.ts, hello.ts        # Neon config (Postgres, object storage bucket, starter function)
+├── render.yaml              # Render blueprint (API + static frontend)
+├── deployment.md            # Record of the live deployment
+├── run_mokinjay.sh          # One-command local start
+└── .env.example             # Environment template
 ```
 
 ## Prerequisites
@@ -93,255 +83,190 @@ mokinjay project/
 |----------|---------|-------------|
 | Python | 3.12+ | Backend |
 | Node.js | 20+ | Frontend |
-| PostgreSQL | 14+ | Database |
-| Redis | 7+ | Celery queue, WebSocket pub/sub |
-| Docker | 20+ | Optional (can run Redis/Postgres via Docker) |
+| PostgreSQL | 14+ | Database (local, or a hosted URL) |
+| Redis | 7+ | Public API rate limiter (fails open without it) |
+| Docker | 20+ | Sandbox containers (optional; a subprocess fallback exists) |
 
 ## Setup & Run
 
-### Quick Start (One Command)
+### Quick Start
 
 ```bash
-# 1. Clone the project and enter the directory
-cd "mokinjay project"
-
-# 2. Copy and configure environment variables
 cp .env.example .env
-# Edit .env to add your API keys:
-#   OPENAI_API_KEY=sk-...
-#   ANTHROPIC_API_KEY=sk-ant-...
+# Set at least:
+#   DATABASE_URL=<PostgreSQL URL>
 #   JWT_SECRET_KEY=<python scripts/generate_jwt_secret.py>
 #   LLM_ENCRYPTION_KEY=<python scripts/generate_fernet_key.py>
-#   DATABASE_URL=<your PostgreSQL URL; the built-in default is a local fallback>
 
-# 3. Run everything
 ./run_mokinjay.sh
 ```
 
-The script will automatically:
-- Start PostgreSQL and Redis (or use Docker for Redis)
-- Create a Python virtual environment and install dependencies
-- Run database migrations
-- Install npm packages
-- Start the backend, Celery worker, and frontend
-
-Open **http://localhost:5173** in your browser.
+The script starts Redis, the backend on port 8001, a Celery worker and the frontend on port 5173. It does not run migrations. Run them yourself first (see below). Then open **http://localhost:5173**.
 
 ### Manual Setup
 
-#### 1. Start Databases
-
-**Option A - Local install (Fedora/RHEL):**
 ```bash
-sudo dnf install postgresql-server redis
-sudo postgresql-setup --initdb
-sudo systemctl start postgresql redis
-sudo systemctl enable postgresql redis
-
-# Set postgres password and create database
-sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
-sudo -u postgres createdb agentbuilder
-```
-
-**Option B - Docker:**
-```bash
-docker-compose up postgres redis -d
-```
-
-#### 2. Backend
-
-```bash
+# Backend
 cd backend
-
-# Create virtual environment
 python3 -m venv venv
-source venv/bin/activate
+./venv/bin/pip install -r requirements.txt
 
-# Install dependencies
-pip install -r requirements.txt
+# Migrations. Alembic reads DATABASE_URL from the repo-root .env and refuses a
+# remote host unless ALLOW_REMOTE_MIGRATIONS=1 is set.
+./venv/bin/alembic upgrade head
 
-# Run database migrations. Both the app and Alembic read DATABASE_URL from the
-# repo-root .env (loaded by absolute path, wherever you invoke them from). If
-# that URL points at a remote host, Alembic refuses to run unless you set
-# ALLOW_REMOTE_MIGRATIONS=1. To migrate a local database explicitly:
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/agentbuilder alembic upgrade head
+# Admin user and Default workspace (idempotent)
+./venv/bin/python seed.py --generate-password
 
-# Start the API server
-uvicorn app.main:app --reload --port 8001
+# API server (port 8001, not 8000)
+./venv/bin/uvicorn app.main:app --reload --port 8001
 ```
 
-#### 3. Celery Worker (separate terminal)
-
 ```bash
-cd backend
-source venv/bin/activate
-celery -A app.workers.celery_app worker --loglevel=info
-```
-
-#### 4. Frontend (separate terminal)
-
-```bash
+# Frontend
 cd frontend
-npm install
-npm run dev
+npm install          # set OPENUI_TELEMETRY_DISABLED=1 to skip OpenUI install telemetry
+npm run dev          # http://localhost:5173, proxies /api to 8001
+```
+
+### Tests
+
+```bash
+# Backend: needs a local PostgreSQL database whose name ends in _test (it truncates tables)
+cd backend && ./venv/bin/python -m pytest unit_tests/ -q -m "not docker"
+
+# Frontend
+cd frontend && npm test
 ```
 
 ### Docker (Full Stack)
 
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
-
 docker-compose up --build
 ```
 
-This starts all services: PostgreSQL, Redis, Backend (port 8001), Celery worker, Frontend (port 5173).
-
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/agentbuilder` | Async PostgreSQL connection used by both the app and Alembic. The built-in default is only a fallback: this repo's `.env` points it at the hosted Supabase instance (session pooler), which is where the app actually connects. |
-| `TEST_DATABASE_URL` | `postgresql+asyncpg://imyuvi@localhost:5432/mokinjay_test` | Database for the test suite. Must end in `_test` or the suite refuses to start. Read by `conftest.py`, never by the app. |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection |
-| `JWT_SECRET_KEY` | `your-super-secret-key-change-in-production` | JWT signing secret (**change this**). Mint one with `python scripts/generate_jwt_secret.py`. |
-| `LLM_ENCRYPTION_KEY` | *(empty)* | Fernet key encrypting LLM API keys at rest. **Required to save an LLM profile** — blank makes `crypto.py` raise on first use. Mint one with `python scripts/generate_fernet_key.py` (rotating it makes every stored key undecryptable). |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Access token lifetime |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Refresh token lifetime |
-| `OPENAI_API_KEY` | *(empty)* | OpenAI API key for Agent nodes |
-| `ANTHROPIC_API_KEY` | *(empty)* | Anthropic API key for Agent nodes |
+All settings load from the **repo-root `.env`** by absolute path, so the working directory never changes which database is used. `.env.example` is the template.
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | PostgreSQL URL used by the app and Alembic. Both `postgresql+asyncpg://` and libpq-style URLs (as `neon env pull` writes them) work. The built-in default is a local fallback. |
+| `DATABASE_URL_UNPOOLED` | Optional direct URL that Alembic uses when `DATABASE_URL` is a pooled host (Neon). |
+| `TEST_DATABASE_URL` | Database for the test suite. Its name must end in `_test`. |
+| `JWT_SECRET_KEY` | JWT signing secret. Mint one with `scripts/generate_jwt_secret.py`. |
+| `LLM_ENCRYPTION_KEY` | Fernet key for stored LLM keys, connector secrets and database URIs. Required to save an LLM profile. Rotating it makes every stored secret undecryptable. |
+| `REDIS_URL` | Redis for the `/v1` rate limiter (default `redis://localhost:6379`). |
+| `PUBLIC_API_RATE_LIMIT_PER_MINUTE` | Per-key limit on `/v1` (default 60). |
+| `FRONTEND_URL` | Allowed CORS origin (default `http://localhost:5173`). |
+| `SANDBOX_*` | Sandbox backend (`auto`, `docker`, `subprocess`, or the remote daemon URL and secrets), image, memory, CPU and timeouts. |
+| `STORAGE_S3_*` | S3-compatible storage. When empty, files go to the local filesystem. Empty values fall back to Neon's `AWS_*` variables. |
+| `STORAGE_MAX_UPLOAD_BYTES` | Upload ceiling (default 95 MiB). |
+| `MS_CLIENT_*`, `VITE_GOOGLE_*` | OneDrive and Google Drive import. |
+| `TELEGRAM_*` | Admin OTP login. |
 
 ## Usage
 
-1. **Login** at http://localhost:5173/login (or use Admin OTP via Telegram)
-2. **Build an agent** — open **Agents** and click **New agent**. Give it an LLM profile, system prompt, structured output, tools, skills, connectors, files, and data sources from the sidebar.
-3. **Test it** — open the agent in **Playground** and chat with it.
-4. **Expose it** — create a key under **API Keys**, then call the agent from an external app with `Authorization: Bearer mk_...` against `POST /v1/chat` (the `agent_id` is named per request; the key's workspace is the boundary).
-5. **Toggle dark mode** using the sun/moon icon in the navbar
+1. **Log in** at http://localhost:5173/login. You land on the Activity dashboard.
+2. **Fill the resource library** with an LLM profile, then any prompts, tools, skills, connectors, files and data sources.
+3. **Build an agent** under **Agents**.
+4. **Test it** in **Playground**. Tool calls, retries, skipped components and a queued run all show in the chat.
+5. **Expose it**: create a key under **API Keys**, choose which agents it may call, then call the agent:
 
-### Legacy workflow canvas
+```bash
+curl -X POST http://localhost:8001/v1/chat \
+  -H "Authorization: Bearer mk_..." -H "Content-Type: application/json" \
+  -d '{"agent_id": "<agent id>", "message": "Hello"}'
+```
 
-The original drag-and-drop canvas still runs from **Workflows**:
+When every sandbox in the workspace is busy, a `/v1/chat` request waits for up to 2 minutes with its connection open, so set the client read timeout above that. After that, a buffered request returns 429 `sandbox_busy` with a `Retry-After` header, and a streamed request gets a `sandbox_busy` error event. Nothing from the refused turn is stored.
 
-1. **Create a workflow** from the dashboard by clicking "New Workflow"
-2. **Build your pipeline** by dragging modules from the left sidebar onto the canvas:
-   - **Input** — Entry point for your workflow data
-   - **Prompt** — Template with `{variable}` substitution
-   - **Agent** — LLM call (select provider: OpenAI, Anthropic, or Gemini)
-   - **Output** — Collect the final result
-   - **Conditional** — Branch logic (contains, equals, regex, greater/less than)
-   - **Transform** — Data manipulation (JSON parse, extract field, uppercase, split, etc.)
-   - **HTTP Request** — External API calls
-   - **Knowledge Base** — RAG retrieval (canvas node only; not registered in the backend engine)
-3. **Connect nodes** by dragging from output handles to input handles
-4. **Configure nodes** by clicking them to open the properties panel
-5. **Save** your workflow with the Save button
-6. **Run** with the Run button and watch execution progress in real-time
-7. **Rename workflows** by clicking the name in the toolbar or using the card menu
+6. **Watch usage** on the dashboard and in **Activity Logs**.
 
 ## API Endpoints
 
-### Auth & Sessions
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/auth/login` | Login, returns JWT tokens and creates session |
-| `POST` | `/api/auth/refresh` | Refresh access token |
-| `GET` | `/api/auth/me` | Get current user profile |
-| `POST` | `/api/auth/logout` | Revoke session across HTTP & WebSocket |
-| `POST` | `/api/auth/admin/otp/send` | Send OTP to Telegram |
-| `POST` | `/api/auth/admin/otp/validate` | Validate OTP, return JWT |
+Internal routes are workspace-scoped and use session JWTs. `W` below stands for `/api/workspaces/{workspace_id}`.
 
-### Workspaces
+### Auth, workspaces, users
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `POST` | `/api/auth/login`, `/api/auth/refresh` | Log in, refresh tokens |
+| `POST` | `/api/auth/logout`, `/api/auth/logout-all` | Revoke this session or all sessions (HTTP and WebSocket) |
+| `GET` | `/api/auth/me` | Current user |
+| `POST` | `/api/auth/admin/otp/send`, `/validate` | Telegram admin OTP |
 | `GET/POST` | `/api/workspaces` | List/create workspaces |
-| `GET/PUT/DELETE` | `/api/workspaces/:id` | Get/update/delete workspace |
+| `GET/PUT/DELETE` | `W` | Get/update/delete a workspace |
+| `GET/POST`, `DELETE` | `W/members`, `W/members/{user_id}` | Workspace members |
 
-### LLM Profiles
+### Resource library
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/workspaces/:id/llms` | List LLM profiles (`?usable=true` for verified only) |
-| `POST` | `/api/workspaces/:id/llms/test` | Test connection and save profile (test-as-save) |
-| `GET` | `/api/workspaces/:id/llms/context-window` | Look up model context window |
-| `DELETE` | `/api/workspaces/:id/llms/:id` | Delete LLM profile |
+| `GET/POST`, `GET/PUT/DELETE` | `W/prompts`, `W/prompts/{id}` | System prompts |
+| `GET`, `POST` | `W/llm-profiles` (`?usable=true`), `W/llm-profiles/test` | List profiles; test-and-save |
+| `POST`, `DELETE` | `W/llm-profiles/{id}/test`, `W/llm-profiles/{id}` | Retest; delete (409 while referenced) |
+| `GET` | `W/llm-profiles/context-window` | Look up a model's context window |
+| `GET/POST`, `GET/PUT/DELETE` | `W/structured-outputs`, `W/structured-outputs/{id}` | Structured outputs (renames cascade) |
+| `POST` | `W/structured-outputs/parse-schema` | Convert pasted JSON Schema to fields |
+| `GET/POST`, `GET/PUT/DELETE` | `W/tools`, `W/tools/{id}` | User-defined tools |
+| `GET`, `POST` | `W/tools/builtin`, `W/tools/validate` | Built-in tools; validate tool code |
+| `GET/POST`, `GET/PUT/DELETE` | `W/skills`, `W/skills/{id}` | Skills |
+| `GET` | `W/skills/reference-menu` | `@`/`/` reference menu |
+| `GET`, `GET/POST`, `GET/PUT/DELETE` | `W/connectors/catalog`, `W/connectors`, `W/connectors/{id}` | Connector catalog and instances |
+| `POST` | `W/connectors/{id}/test` | Probe an MCP connector |
+| `GET/POST`, `PATCH/DELETE` | `W/files/folders`, `W/files/folders/{id}` | Folders |
+| `GET/POST/PATCH` | `W/files/documents` | List, upload (multipart), move files |
+| `DELETE`, `GET` | `W/files/documents/{id}`, `.../download` | Delete (refused while attached); download |
+| `POST` | `W/imports/onedrive`, `W/imports/google` | Import from cloud drives |
+| `GET`, `GET`, `DELETE` | `/api/cloud-connections`, `/onedrive/authorize`, `/onedrive/callback`, `/onedrive/items`, `/{provider}` | Per-user cloud connections |
+| `GET/POST`, `GET/PATCH/DELETE` | `W/external-databases`, `W/external-databases/{id}` | Data sources |
+| `GET` | `W/external-databases/{id}/schema` | Data source tables and columns |
+| `GET`, `PUT/DELETE` | `W/search-credentials`, `W/search-credentials/{provider}` | Exa/Tavily web search keys |
 
-### Structured Outputs
+### Agents, Playground, keys, activity
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET/POST` | `/api/workspaces/:id/structured-outputs` | List/create structured outputs |
-| `GET/PUT/DELETE` | `/api/workspaces/:id/structured-outputs/:id` | Get/update/delete definition (cascade renames) |
-| `POST` | `/api/workspaces/:id/structured-outputs/parse-schema` | Parse raw JSON schema into fields |
+| `GET/POST`, `GET/PUT/DELETE` | `W/agents`, `W/agents/{id}` | Agents |
+| `GET` | `W/agents/options` | Pickable resources for the agent editor |
+| `GET/POST`, `GET/PATCH/DELETE` | `W/playground/sessions`, `W/playground/sessions/{id}` | Playground sessions |
+| `POST` | `W/playground/sessions/{id}/chat` | Send a message (SSE stream of text and activity) |
+| `GET/POST`, `GET/PATCH/DELETE` | `W/api-keys`, `W/api-keys/{id}` | API keys and their agent access |
+| `POST`, `GET` | `W/api-keys/{id}/rotate`, `/disable`, `/enable`, `/usage` | Key lifecycle and usage |
+| `GET` | `W/activity/summary`, `W/activity/logs`, `W/activity/logs/{id}`, `W/activity/sessions` | Dashboard and logs (filters: `from`, `to`, `tz`, `api_key_id`, `agent_id`, `source`, `model`) |
 
-### Tools
+### Public API (Bearer `mk_...`)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET/POST` | `/api/workspaces/:id/tools` | List (custom + built-in)/create custom tool |
-| `GET/PUT/DELETE` | `/api/workspaces/:id/tools/:id` | Get/update/delete tool (delete blocked if used in skills) |
+| `POST` | `/v1/chat` | Run an agent (buffered or streamed; optional `conversation_id`) |
+| `GET` | `/v1/agent` | Describe an agent the key may call |
+| `GET` | `/v1/health` | Health check |
 
-### Skills
+### Legacy canvas and other
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET/POST` | `/api/workspaces/:id/skills` | List/create skills (progressive disclosure) |
-| `GET/PUT/DELETE` | `/api/workspaces/:id/skills/:id` | Get/update/delete skill (delete blocked if referenced) |
-
-### Connectors
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/workspaces/:id/connectors/catalog` | List predefined connectors catalog |
-| `GET/POST` | `/api/workspaces/:id/connectors` | List/create connector instances |
-| `GET/PUT/DELETE` | `/api/workspaces/:id/connectors/:id` | Get/update/delete connector instance |
-| `POST` | `/api/workspaces/:id/connectors/:id/test` | Test MCP tool discovery probe |
-
-### Files & Storage
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET/POST` | `/api/workspaces/:id/files/folders` | List/create folders |
-| `PATCH/DELETE` | `/api/workspaces/:id/files/folders/:id` | Rename/delete a folder (force delete needs `force` + the exact name) |
-| `GET` | `/api/workspaces/:id/files/documents` | List files (`folder_id`, `unfiled`, `q`) |
-| `POST` | `/api/workspaces/:id/files/documents` | Upload a file (multipart, optional `folder_id`, 95 MiB) |
-| `PATCH` | `/api/workspaces/:id/files/documents` | Move files to a folder or the root |
-| `DELETE` | `/api/workspaces/:id/files/documents/:id` | Delete a file and its bytes (refused while attached) |
-| `GET` | `/api/workspaces/:id/files/documents/:id/download` | Safe file download |
-| `GET/POST` | `/api/workspaces/:id/external-databases` | List/create external DB connection |
-| `DELETE` | `/api/workspaces/:id/external-databases/:id` | Delete external DB connection |
-
-### Workflows & Executions
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET/POST` | `/api/workspaces/:id/workflows` | List/create workflows |
-| `GET/PUT/DELETE` | `/api/workspaces/:id/workflows/:id` | Get/update/delete workflow |
-| `POST` | `/api/workspaces/:id/workflows/:id/execute` | Execute a workflow |
-| `POST` | `/api/workspaces/:id/workflows/:id/publish` | Publish workflow |
-| `GET/POST` | `/api/workspaces/:id/prompts` | List/create system prompts |
-| `GET/PUT/DELETE` | `/api/workspaces/:id/prompts/:id` | Get/update/delete prompt |
-| `GET` | `/api/workspaces/:id/executions` | List executions |
-| `GET` | `/api/workspaces/:id/executions/:id` | Get execution details + trace |
-| `POST` | `/api/workspaces/:id/executions/:id/cancel` | Cancel running execution |
-
-### Other
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/v1/models` | OpenAI-compatible models fallback stub |
-| `WS` | `/ws/executions/:id` | Real-time execution updates |
+| `GET/POST`, `GET/PUT/DELETE` | `W/workflows`, `W/workflows/{id}` | Workflows |
+| `POST` | `W/workflows/{id}/execute`, `/publish` | Run or publish a workflow |
+| `GET`, `POST` | `W/executions`, `W/executions/{id}`, `/cancel` | Workflow executions |
+| `GET` | `/health`, `/health/db` | Health checks |
+| `GET` | `/v1/models` (main app) | Silent stub that stops local AI tools from probing the port |
+| `WS` | `/ws/executions/{id}` | Execution updates (no publishers wired) |
 
 ## Architecture
 
 ```
-Browser (React 19 + React Flow)
+Browser (React 19)                     External app
+    │  /api (session JWT)                  │  /v1 (mk_... key, rate + credit limits)
+    ▼                                      ▼
+FastAPI (uvicorn, port 8001) ──────────────┘
     │
-    ├── REST API ──────► FastAPI (uvicorn)
-    │                        │
-    │                        ├── SQLAlchemy ──► PostgreSQL
-    │                        │
-    │                        ├── Celery task dispatch ──► Redis ──► Celery Worker
-    │                        │                                         │
-    │                        │                           WorkflowExecutor
-    │                        │                           (DAG build → topological sort
-    │                        │                            → module execution → trace)
-    │                        │
-    └── WebSocket ◄──────────┤◄── Redis pub/sub ◄──────────────────────┘
-         (live node status)
+    ├── agent runtime (LangChain create_agent + LangGraph)
+    │     ├── tool middleware: retry transient errors → errors to the model → per-run failure limit
+    │     ├── built-in tools, data-source queries (read-only), MCP connectors, web search, subagents
+    │     └── sandbox (per-workspace FIFO queue) ── Docker / subprocess / remote daemon
+    │                                              (user tools, attached files)
+    ├── SQLAlchemy (asyncpg) ── PostgreSQL
+    ├── storage ── filesystem or S3-compatible bucket
+    └── Redis ── /v1 rate limiter
 ```
 
 ## License
