@@ -65,7 +65,13 @@ from app.services.output_formats import (
     require_supported,
 )
 from app.services.sandbox import InMemoryToolSource, SandboxConfig, SandboxSession
-from app.services.sandbox.budget import release, reserve
+from app.services.sandbox.budget import (
+    MIN_RETRY_AFTER_S,
+    SandboxBusy,
+    SlotRequest,
+    release,
+    reserve,
+)
 from app.services.storage import ObjectNotFoundError, StorageError, get_storage
 from app.services.tool_schema import extract_schema, extraction_error
 from app.services.web_search import build_web_search_tool, native_web_search_spec
@@ -491,31 +497,49 @@ async def _stage_files(
     return staging, names, missing
 
 
-def _open_session(
-    workspace_id: str, validated: ValidatedAgent, data_dir: str | None
-) -> tuple[SandboxSession, int]:
-    """The run's sandbox, plus the megabytes reserved for it (0 when there is nothing
-    to reserve). Callers must `release` the returned amount in their teardown.
+def _sandbox_config(validated: ValidatedAgent) -> tuple[SandboxConfig, int]:
+    """The run's sandbox size and the megabytes it must reserve (0 when there is
+    nothing to reserve).
 
     A run with no attached files keeps the configured size: there is nothing to read,
     so the tool-only tier is right and the budget is not touched.
     """
     config = SandboxConfig.from_settings()
-    reserved_mb = 0
     if validated.attached_documents:
         largest = max((row.file_size or 0) for row in validated.attached_documents)
         config = config.tiered(largest)
-        if not reserve(workspace_id, config.memory_mb):
-            raise AgentRuntimeError(
-                "This workspace has too many sandbox runs in flight; try again when one finishes."
-            )
-        reserved_mb = config.memory_mb
-    session = SandboxSession(
+        return config, config.memory_mb
+    return config, 0
+
+
+def _make_session(
+    config: SandboxConfig, validated: ValidatedAgent, data_dir: str | None
+) -> SandboxSession:
+    return SandboxSession(
         config=config,
         data_dir=data_dir,
         tools=InMemoryToolSource({row.name: row.code for row in validated.workspace_tools}),
     )
-    return session, reserved_mb
+
+
+def _plan_slot(
+    workspace_id: str, validated: ValidatedAgent
+) -> tuple[SandboxConfig, SlotRequest | None]:
+    """Size the sandbox and, when it needs memory, the request that waits for it."""
+    config, reserved_mb = _sandbox_config(validated)
+    return config, (SlotRequest(workspace_id, reserved_mb) if reserved_mb else None)
+
+
+def _open_session(
+    workspace_id: str, validated: ValidatedAgent, data_dir: str | None
+) -> tuple[SandboxSession, int]:
+    """A subagent's sandbox plus the megabytes reserved for it (release them in
+    teardown). It tries once and raises `SandboxBusy` when the budget is full: its
+    parent already holds memory, so waiting here could deadlock until the deadline."""
+    config, reserved_mb = _sandbox_config(validated)
+    if reserved_mb and not reserve(workspace_id, reserved_mb):
+        raise SandboxBusy(MIN_RETRY_AFTER_S, "queue_full")
+    return _make_session(config, validated, data_dir), reserved_mb
 
 
 def _subagent_runner(workspace_id: str, child_id: str, depth: int):
@@ -753,7 +777,7 @@ async def stream_turn(
     started = time.monotonic()
     sandbox: Any | None = None
     staging: Path | None = None
-    reserved_mb = 0
+    slot: SlotRequest | None = None
 
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
@@ -866,12 +890,35 @@ async def stream_turn(
             staging, filenames, missing_files = await _stage_files(
                 validated.attached_documents
             )
-            sandbox, reserved_mb = _open_session(
-                workspace_id, validated, str(staging) if staging else None
-            )
+            sandbox_config, slot = _plan_slot(workspace_id, validated)
             unavailable: list[str] = [
                 f"File {name} (not found in storage)" for name in missing_files
             ]
+            model_snapshot = (validated.profile.provider, validated.profile.model_id)
+            await db.commit()
+
+        yield {
+            "event": "message",
+            "data": {
+                "user_message_id": user_message_id,
+                "assistant_message_id": assistant_message_id,
+            },
+        }
+
+        # Wait for sandbox memory with no DB session open: up to 20 queued runs
+        # would otherwise each pin a pooled connection for minutes.
+        if slot is not None:
+            waiting = slot.wait()
+            try:
+                async for position in waiting:
+                    yield {"event": "queued", "data": {"position": position}}
+            finally:
+                await waiting.aclose()
+
+        async with async_session() as db:
+            sandbox = _make_session(
+                sandbox_config, validated, str(staging) if staging else None
+            )
             tools = await build_tools(
                 db,
                 workspace_id,
@@ -889,17 +936,8 @@ async def stream_turn(
                 output_format=output_format,
                 unavailable=unavailable,
             )
-            model_snapshot = (validated.profile.provider, validated.profile.model_id)
             await _bump_run_usage(db, workspace_id, validated)
             await db.commit()
-
-        yield {
-            "event": "message",
-            "data": {
-                "user_message_id": user_message_id,
-                "assistant_message_id": assistant_message_id,
-            },
-        }
 
         if filenames:
             staged_event: dict[str, Any] = {"type": "files_staged", "names": list(filenames)}
@@ -1128,6 +1166,30 @@ async def stream_turn(
             await _delete_assistant_message(assistant_message_id)
         yield {"event": "error", "data": {"detail": detail}}
 
+    except SandboxBusy as exc:
+        # Expected under load, not a bug: no traceback.
+        detail = str(exc)
+        logger.warning(f"Playground turn {execution_id} refused: sandbox busy ({exc.reason})")
+        _release_pending()
+        await _mark_execution(
+            execution_id,
+            "failed",
+            error=detail,
+            started=started,
+            model=model_snapshot,
+            ttft_ms=ttft_ms,
+        )
+        if assistant_message_id is not None:
+            await _delete_assistant_message(assistant_message_id)
+        yield {
+            "event": "error",
+            "data": {
+                "detail": detail,
+                "code": "sandbox_busy",
+                "retry_after_s": exc.retry_after_s,
+            },
+        }
+
     except Exception as exc:
         logger.exception(f"Playground turn {execution_id} failed")
         _release_pending()
@@ -1161,8 +1223,8 @@ async def stream_turn(
                 await asyncio.to_thread(sandbox.close)
         finally:
             try:
-                if reserved_mb:
-                    release(workspace_id, reserved_mb)
+                if slot is not None:
+                    slot.release()
             finally:
                 if staging is not None:
                     shutil.rmtree(staging, ignore_errors=True)

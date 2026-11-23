@@ -222,6 +222,7 @@ async def public_auth_error_handler(request: Request, exc: PublicAuthError):
         "agent_not_permitted": 403,
         "agent_mismatch": 409,
         "rate_limit_exceeded": 429,
+        "sandbox_busy": 429,
         "credit_limit_exceeded": 402,
         "invalid_request": 400,
     }
@@ -230,6 +231,8 @@ async def public_auth_error_handler(request: Request, exc: PublicAuthError):
     if exc.code == "rate_limit_exceeded":
         # Seconds until the next fixed window starts.
         headers["Retry-After"] = str(60 - (datetime.now(timezone.utc).second))
+    elif exc.code == "sandbox_busy" and exc.retry_after_s is not None:
+        headers["Retry-After"] = str(exc.retry_after_s)
     return JSONResponse(
         status_code=status,
         headers=headers,

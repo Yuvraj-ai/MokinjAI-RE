@@ -200,6 +200,7 @@ async def public_chat(
     cost = 0.0
     status = "completed"
     error_detail: str | None = None
+    busy: PublicAuthError | None = None
     async for event in stream_turn(key.workspace_id, session.id, body.message, execution.id):
         kind = event["event"]
         if kind == "token":
@@ -215,6 +216,13 @@ async def public_chat(
         elif kind == "error":
             error_detail = event["data"]["detail"]
             status = "failed"
+            if event["data"].get("code") == "sandbox_busy":
+                busy = PublicAuthError(
+                    "sandbox_busy", error_detail, event["data"].get("retry_after_s")
+                )
+
+    if busy is not None:
+        raise busy
 
     assistant = (
         await db.execute(

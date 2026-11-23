@@ -23,9 +23,10 @@ _LAST_USED_THROTTLE_S = 60
 class PublicAuthError(Exception):
     """The credential is missing, unknown, revoked, disabled or expired."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, retry_after_s: int | None = None):
         self.code = code
         self.message = message
+        self.retry_after_s = retry_after_s
         super().__init__(message)
 
 
@@ -40,6 +41,7 @@ def public_error_response(code: str, message: str, status_code: int, request_id:
         "agent_not_permitted": "permission_error",
         "agent_mismatch": "invalid_request_error",
         "rate_limit_exceeded": "rate_limit_error",
+        "sandbox_busy": "rate_limit_error",
         "credit_limit_exceeded": "billing_error",
         "invalid_request": "invalid_request_error",
         "internal_error": "internal_error",
