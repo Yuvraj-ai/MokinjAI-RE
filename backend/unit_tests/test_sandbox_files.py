@@ -1,17 +1,19 @@
 """Staging the run's files and the execute_python adapter."""
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
 
+from app.logging import logger as app_logger
 from app.models.knowledge import DOCUMENT_STATUS_STORED, Document
 from app.services.agent_runtime import _attachment_name, _stage_files
 from app.services.agent_tools import STDOUT_LIMIT, TRUNCATION_MARKER, sandbox_python_tool
 from app.services.sandbox.backends import SandboxConfig
 from app.services.sandbox.errors import ErrorInfo, ErrorKind
 from app.services.sandbox.session import ExecResult, GeneratedFile, SandboxSession
-from app.services.storage import ObjectNotFoundError
+from app.services.storage import ObjectNotFoundError, StorageError
 
 
 def document(name: str, url: str = "workspaces/ws/files/doc") -> Document:
@@ -81,7 +83,7 @@ async def test_staging_writes_bytes_and_skips_a_missing_object(monkeypatch, tmp_
         lambda: FakeStorage({"a": b"hello"}, missing={"b"}),
     )
 
-    staging, names = await _stage_files(documents)
+    staging, names, missing = await _stage_files(documents)
 
     assert staging is not None
     assert names == ["notes.txt"]
@@ -91,7 +93,7 @@ async def test_staging_writes_bytes_and_skips_a_missing_object(monkeypatch, tmp_
 
 @pytest.mark.asyncio
 async def test_no_documents_means_no_directory():
-    staging, names = await _stage_files([])
+    staging, names, missing = await _stage_files([])
 
     assert staging is None
     assert names == []
@@ -157,3 +159,56 @@ def test_the_tool_is_not_offered_on_the_subprocess_backend():
 
     assert session.uses_docker is False
     assert SandboxSession(config=SandboxConfig(backend="docker")).uses_docker is True
+
+
+@pytest.mark.asyncio
+async def test_missing_file_is_reported_as_missing(monkeypatch):
+    documents = [document("notes.txt", "a"), document("gone.txt", "b")]
+    monkeypatch.setattr(
+        "app.services.agent_runtime.get_storage",
+        lambda: FakeStorage({"a": b"hello"}, missing={"b"}),
+    )
+
+    _, names, missing = await _stage_files(documents)
+
+    assert names == ["notes.txt"]
+    assert missing == ["gone.txt"]
+
+
+@pytest.mark.asyncio
+async def test_missing_file_logs_one_warning_without_traceback(monkeypatch, caplog):
+    monkeypatch.setattr(
+        "app.services.agent_runtime.get_storage",
+        lambda: FakeStorage({}, missing={"b"}),
+    )
+    app_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger=app_logger.name):
+            await _stage_files([document("gone.txt", "b")])
+    finally:
+        app_logger.removeHandler(caplog.handler)
+
+    records = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(records) == 1
+    assert records[0].levelno == logging.WARNING
+    assert not records[0].exc_info
+    assert "id-gone.txt" in records[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_other_storage_errors_are_skipped_and_logged_with_traceback(monkeypatch, caplog):
+    class Broken:
+        async def download_file(self, key):
+            raise StorageError("boom")
+
+    monkeypatch.setattr("app.services.agent_runtime.get_storage", lambda: Broken())
+    app_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger=app_logger.name):
+            _, names, missing = await _stage_files([document("x.txt", "b")])
+    finally:
+        app_logger.removeHandler(caplog.handler)
+
+    assert names == [] and missing == ["x.txt"]
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(errors) == 1 and errors[0].exc_info

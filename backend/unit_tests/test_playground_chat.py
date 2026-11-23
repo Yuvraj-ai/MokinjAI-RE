@@ -457,7 +457,7 @@ class TestStreamTurn:
         graph = FakeGraphV2()
         _install(monkeypatch, session_factory, graph)
         async def fake_stage(documents):
-            return None, ["a.csv", "b.csv"]
+            return None, ["a.csv", "b.csv"], []
 
         monkeypatch.setattr(
             "app.services.agent_runtime._stage_files", fake_stage

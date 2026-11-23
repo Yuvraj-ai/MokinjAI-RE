@@ -66,7 +66,7 @@ from app.services.output_formats import (
 )
 from app.services.sandbox import InMemoryToolSource, SandboxConfig, SandboxSession
 from app.services.sandbox.budget import release, reserve
-from app.services.storage import StorageError, get_storage
+from app.services.storage import ObjectNotFoundError, StorageError, get_storage
 from app.services.tool_schema import extract_schema, extraction_error
 from app.services.web_search import build_web_search_tool, native_web_search_spec
 from app.tools.registry import list_builtin_tools
@@ -453,31 +453,42 @@ def _attachment_name(raw: str | None, fallback: str, used: set[str]) -> str:
     return candidate
 
 
-async def _stage_files(documents: list[Document]) -> tuple[Path | None, list[str]]:
+async def _stage_files(
+    documents: list[Document],
+) -> tuple[Path | None, list[str], list[str]]:
     """Download the run's files into a directory the sandbox mounts read-only.
 
     A missing object is logged and skipped rather than killing the run: the rest of the
-    files are still worth reading, and the model can say one name was not there.
+    files are still worth reading. Its name is returned as the third item so the caller
+    can tell the model the file is attached but not in storage.
     """
     if not documents:
-        return None, []
+        return None, [], []
     staging = Path(tempfile.mkdtemp(prefix="mokinjay-files-"))
     storage = get_storage()
     used: set[str] = set()
     names: list[str] = []
+    missing: list[str] = []
     for row in documents:
         if not row.file_url:
             continue
+        name = _attachment_name(row.filename, row.id, used)
         try:
             data = await storage.download_file(row.file_url)
+        except ObjectNotFoundError:
+            logger.warning(
+                f"Attached file {row.id} ({name}) is not in storage; it will be absent from /app/data"
+            )
+            missing.append(name)
+            continue
         except StorageError:
             logger.exception(f"Could not stage file {row.id}; it will be absent from /app/data")
+            missing.append(name)
             continue
-        name = _attachment_name(row.filename, row.id, used)
         used.add(name)
         names.append(name)
         (staging / name).write_bytes(data)
-    return staging, names
+    return staging, names, missing
 
 
 def _open_session(
@@ -519,11 +530,15 @@ def _subagent_runner(workspace_id: str, child_id: str, depth: int):
                     return "That subagent no longer exists."
                 data = await saved_input(db, child)
                 validated = await validate_agent(db, workspace_id, data, agent_id=child.id)
-                staging, filenames = await _stage_files(validated.attached_documents)
+                staging, filenames, missing_files = await _stage_files(
+                    validated.attached_documents
+                )
                 session, reserved_mb = _open_session(
                     workspace_id, validated, str(staging) if staging else None
                 )
-                unavailable: list[str] = []
+                unavailable: list[str] = [
+                    f"File {name} (not found in storage)" for name in missing_files
+                ]
                 tools = await build_tools(
                     db,
                     workspace_id,
@@ -848,11 +863,15 @@ async def stream_turn(
                 output_format,
                 validated.profile.context_window if validated.profile else None,
             )
-            staging, filenames = await _stage_files(validated.attached_documents)
+            staging, filenames, missing_files = await _stage_files(
+                validated.attached_documents
+            )
             sandbox, reserved_mb = _open_session(
                 workspace_id, validated, str(staging) if staging else None
             )
-            unavailable: list[str] = []
+            unavailable: list[str] = [
+                f"File {name} (not found in storage)" for name in missing_files
+            ]
             tools = await build_tools(
                 db,
                 workspace_id,
