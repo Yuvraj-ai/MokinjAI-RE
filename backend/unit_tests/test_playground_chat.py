@@ -1055,3 +1055,122 @@ class TestToolRetryActivity:
         ends = [a for a in activity if a["type"] == "tool_end"]
         assert len(ends) == 2 and all("attempts" not in e for e in ends)
         assert {e["id"] for e in ends} == {"a", "b"}
+
+    @pytest.mark.asyncio
+    async def test_sibling_chain_event_does_not_release_a_held_error(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        # Probed: parallel calls each have their own tools:<uuid> namespace; a
+        # sibling finishing emits its own chain events while A sleeps between
+        # retries, and the loop's LangGraph stream events carry no namespace.
+        events = [
+            _tool_event("on_tool_start", "a0", "A", input={}),
+            _tool_event("on_tool_start", "b0", "B", input={}),
+            _tool_event("on_tool_error", "a0", "A", input={}, error="boom", tool_call_id="ca"),
+            _tool_event("on_tool_end", "b0", "B", output="2", tool_call_id="cb"),
+            {"event": "on_chain_stream", "name": "tools",
+             "metadata": {"langgraph_checkpoint_ns": "tools:B"}, "data": {}},
+            {"event": "on_chain_end", "name": "tools",
+             "metadata": {"langgraph_checkpoint_ns": "tools:B"}, "data": {}},
+            {"event": "on_chain_stream", "name": "LangGraph",
+             "metadata": {}, "parent_ids": [], "data": {}},
+            _tool_event("on_tool_start", "a1", "A", input={}),
+            _tool_event("on_tool_end", "a1", "A", output="fine", tool_call_id="ca"),
+        ]
+        activity = await self._run(
+            db_session, session_factory, test_workspace, monkeypatch, events
+        )
+        a_cards = [a for a in activity if a["id"] == "a0"]
+        assert [a["type"] for a in a_cards] == ["tool_start", "tool_end"]
+        assert a_cards[1]["attempts"] == 2 and a_cards[1]["result"] == "fine"
+        assert not [a for a in activity if a["id"] == "a1"]
+        assert len([a for a in activity if a["type"] == "tool_end"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_own_tools_node_end_releases_the_held_error_at_once(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        agent, chat_session, execution = await _setup(db_session, test_workspace)
+        events = [
+            _tool_event("on_tool_start", "a0", "A", input={}),
+            _tool_event("on_tool_error", "a0", "A", input={}, error="boom", tool_call_id="ca"),
+            {"event": "on_chain_end", "name": "tools",
+             "metadata": {"langgraph_checkpoint_ns": "tools:A"}, "data": {}},
+            _tool_event("on_tool_start", "z", "Z", input={}),
+        ]
+        _install(monkeypatch, session_factory, RetryGraph(events))
+        gen = stream_turn(test_workspace.id, chat_session.id, "hi", execution.id)
+        seen = []
+        async for e in gen:
+            if e["event"] == "activity":
+                seen.append(e["data"])
+                if e["data"]["id"] == "z":
+                    break
+        await gen.aclose()
+        assert [a["type"] for a in seen] == ["tool_start", "tool_end", "tool_start"]
+        assert seen[1]["error"] == "boom"
+
+    async def _assistant_row(self, session_factory, chat_session):
+        async with session_factory() as check:
+            return (
+                (
+                    await check.execute(
+                        select(ChatMessage).where(
+                            ChatMessage.session_id == chat_session.id,
+                            ChatMessage.role == "assistant",
+                        )
+                    )
+                )
+                .scalars()
+                .one()
+            )
+
+    @pytest.mark.asyncio
+    async def test_stop_persists_a_held_failed_end(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        agent, chat_session, execution = await _setup(db_session, test_workspace)
+        events = [
+            _tool_event("on_tool_start", "a0", "A", input={}),
+            _tool_event("on_tool_error", "a0", "A", input={}, error="boom", tool_call_id="ca"),
+            _tool_event("on_tool_start", "b0", "B", input={}),
+        ]
+        _install(monkeypatch, session_factory, RetryGraph(events))
+        gen = stream_turn(test_workspace.id, chat_session.id, "hi", execution.id)
+        async for e in gen:
+            if e["event"] == "activity" and e["data"]["id"] == "a0" and e["data"]["type"] == "tool_start":
+                continue
+            if e["event"] == "activity":
+                break
+        await gen.aclose()
+        row = await self._assistant_row(session_factory, chat_session)
+        assert row.status == "stopped"
+        ends = [a for a in row.activity if a["type"] == "tool_end"]
+        assert len(ends) == 1 and ends[0]["id"] == "a0" and ends[0]["error"] == "boom"
+
+    @pytest.mark.asyncio
+    async def test_exception_persists_a_held_failed_end(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        agent, chat_session, execution = await _setup(db_session, test_workspace)
+
+        class Boom:
+            async def astream_events(self, payload, version):
+                yield _tool_event("on_tool_start", "a0", "A", input={})
+                yield _tool_event(
+                    "on_tool_error", "a0", "A", input={}, error="boom", tool_call_id="ca"
+                )
+                raise RuntimeError("graph died")
+
+        _install(monkeypatch, session_factory, Boom())
+        out = [
+            e
+            async for e in stream_turn(
+                test_workspace.id, chat_session.id, "hi", execution.id
+            )
+        ]
+        assert out[-1]["event"] == "error"
+        row = await self._assistant_row(session_factory, chat_session)
+        assert row.status == "failed"
+        ends = [a for a in row.activity if a["type"] == "tool_end"]
+        assert len(ends) == 1 and ends[0]["error"] == "boom"

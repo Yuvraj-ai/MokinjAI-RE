@@ -736,10 +736,12 @@ async def stream_turn(
         _remember(entry)
         return entry
 
-    def _release_pending() -> list[dict[str, Any]]:
-        released = [_finish_tool(key, entry) for key, entry in pending_errors.items()]
-        pending_errors.clear()
-        return released
+    def _release_pending(only: str | None = None) -> list[dict[str, Any]]:
+        if only is None:
+            keys = list(pending_errors)
+        else:
+            keys = [only] if only in pending_errors else []
+        return [_finish_tool(key, pending_errors.pop(key)) for key in keys]
 
     try:
         async with async_session() as db:
@@ -850,9 +852,19 @@ async def stream_turn(
             metadata = event.get("metadata") or {}
             nested = "|" in str(metadata.get("langgraph_checkpoint_ns", ""))
 
-            if pending_errors and not nested and not kind.startswith("on_tool_"):
-                # Something other than a tool event: no retry is coming.
-                for released in _release_pending():
+            if pending_errors and not nested:
+                # Parallel calls each run in their own tools:<id> namespace and
+                # a sibling's events must not end this call's retry window.
+                # Release a held error only when proof arrives that its call is
+                # over: its own tools node ended, or the model node took over.
+                ns = str(metadata.get("langgraph_checkpoint_ns", ""))
+                if kind == "on_chain_end" and event.get("name") == "tools":
+                    to_release = _release_pending(ns)
+                elif kind.startswith("on_chat_model") or ns.startswith("model:"):
+                    to_release = _release_pending()
+                else:
+                    to_release = []
+                for released in to_release:
                     await _flush_activity(assistant_message_id, activity)
                     yield {"event": "activity", "data": released}
 
@@ -990,6 +1002,7 @@ async def stream_turn(
         # Stop button (P8): whatever streamed so far stays, marked stopped.
         # A disconnect before the rows were even created must still cancel the
         # execution — otherwise the row is stuck at "running" forever.
+        _release_pending()
         if assistant_message_id is not None:
             partial = "".join(content_parts)
             await _write_assistant_message(
@@ -1037,6 +1050,7 @@ async def stream_turn(
 
     except Exception as exc:
         logger.exception(f"Playground turn {execution_id} failed")
+        _release_pending()
         detail = str(exc).strip().replace("\n", " ") or exc.__class__.__name__
         await _mark_execution(
             execution_id,
