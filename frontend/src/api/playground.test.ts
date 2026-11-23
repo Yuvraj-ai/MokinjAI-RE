@@ -57,3 +57,39 @@ describe('streamSessionChat', () => {
     expect(seen[1]).toEqual({ type: 'token', delta: 'Hello' })
   })
 })
+
+describe('streamSessionChat: resilience events', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  async function collect(chunks: string[]) {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(new TextEncoder().encode(chunk))
+        controller.close()
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status: 200 })))
+    const seen = []
+    for await (const event of streamSessionChat('ws', 'session', 'hi')) seen.push(event)
+    return seen
+  }
+
+  it('parses queued events', async () => {
+    const seen = await collect(['event: queued\ndata: {"position":2}\n\n'])
+    expect(seen).toEqual([{ type: 'queued', position: 2 }])
+  })
+
+  it('keeps the error code and retry_after_s', async () => {
+    const seen = await collect([
+      'event: error\ndata: {"detail":"The sandbox is busy. Try again in about 30 seconds.","code":"sandbox_busy","retry_after_s":30}\n\n',
+      'event: error\ndata: {"detail":"plain"}\n\n',
+    ])
+    expect(seen[0]).toEqual({
+      type: 'error',
+      detail: 'The sandbox is busy. Try again in about 30 seconds.',
+      code: 'sandbox_busy',
+      retryAfterS: 30,
+    })
+    expect(seen[1]).toEqual({ type: 'error', detail: 'plain' })
+  })
+})

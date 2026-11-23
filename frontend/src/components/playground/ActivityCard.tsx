@@ -9,6 +9,7 @@ import {
   Globe,
   Plug,
   Terminal,
+  TriangleAlert,
   Wrench,
 } from 'lucide-react'
 import type { ActivityEvent } from '../../api/playground'
@@ -50,7 +51,8 @@ function describe(event: ActivityEvent): string {
   if (event.type === 'files_staged') return filesLabel(event)
   const meta = KIND_META[event.kind ?? 'tool'] ?? KIND_META.tool
   const label = meta.label(event)
-  if (event.type === 'tool_end') return label
+  if (event.type === 'tool_end')
+    return event.attempts && event.attempts > 1 ? `${label} after ${event.attempts} attempts` : label
   // tool_start: same label, in-progress verb ("Called get_time" → "Calling get_time").
   return label.replace(/^\w+/, (verb) => START_FORM[verb] ?? verb)
 }
@@ -70,6 +72,22 @@ function bodyOf(event: ActivityEvent): string | null {
   return pick(event.type === 'tool_start' ? event.args : event.result)
 }
 
+/** Resources the run could not use. Always open: the names are the message. */
+function UnavailableCard({ names }: { names: string[] }) {
+  return (
+    <div className="mb-1.5 rounded-lg border border-line bg-status-warning-soft px-3 py-1.5 text-[11.5px] text-status-warning">
+      <p className="flex items-center gap-1.5 font-medium">
+        <TriangleAlert className="h-3 w-3 shrink-0" aria-hidden /> Not available for this run
+      </p>
+      <ul className="mt-1 list-disc pl-6 font-mono">
+        {names.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /**
  * One collapsible activity card (spec P3). Live tool_start rows show a
  * spinner feel via the "Calling —" label; tool_end swaps in the result and
@@ -77,6 +95,7 @@ function bodyOf(event: ActivityEvent): string | null {
  */
 export default memo(function ActivityCard({ event }: { event: ActivityEvent }) {
   const [open, setOpen] = useState(false)
+  if (event.type === 'unavailable') return <UnavailableCard names={event.names ?? []} />
   const isFiles = event.type === 'files_staged'
   const Icon = isFiles ? FolderOpen : (KIND_META[event.kind ?? 'tool'] ?? KIND_META.tool).icon
   // Serialising a result is only needed when the card is actually open. Doing it
