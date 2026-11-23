@@ -32,7 +32,7 @@ Not verified against real providers yet: how reliably each model writes valid Op
 
 ## Fail-safe runs
 
-A failing tool or component no longer kills a run: transient tool errors are retried, other tool errors go back to the model, and components that cannot load are skipped and reported to the model and the activity stream. Sandbox contention queues per workspace (2 minutes, 20 waiting) and then fails with `sandbox_busy` (429 on buffered `/v1/chat`). Details are in conventions and product.
+A failing tool or component does not end a run: transient tool errors are retried, other tool errors go back to the model, and components that cannot load are skipped and reported to the model and the activity stream. Sandbox contention queues per workspace (2 minutes, 20 waiting) and then fails with `sandbox_busy` (429 on buffered `/v1/chat`). A connector tool call that exceeds the 60 s ceiling is reported to the model and is not retried. Details are in conventions and product.
 
 ## Known gaps (open)
 

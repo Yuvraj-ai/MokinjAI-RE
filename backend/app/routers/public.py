@@ -183,7 +183,15 @@ async def public_chat(
 
     if body.stream:
         return StreamingResponse(
-            _sse(stream_turn(key.workspace_id, session.id, body.message, execution.id)),
+            _sse(
+                stream_turn(
+                    key.workspace_id,
+                    session.id,
+                    body.message,
+                    execution.id,
+                    session_created_by_turn=not body.conversation_id,
+                )
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -201,7 +209,13 @@ async def public_chat(
     status = "completed"
     error_detail: str | None = None
     busy: PublicAuthError | None = None
-    async for event in stream_turn(key.workspace_id, session.id, body.message, execution.id):
+    async for event in stream_turn(
+        key.workspace_id,
+        session.id,
+        body.message,
+        execution.id,
+        session_created_by_turn=not body.conversation_id,
+    ):
         kind = event["event"]
         if kind == "token":
             content_parts.append(event["data"]["delta"])

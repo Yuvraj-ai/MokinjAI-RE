@@ -44,8 +44,15 @@ def _status_code(exc: BaseException) -> int | None:
     return code if isinstance(code, int) else None
 
 
+class ToolTimeoutError(Exception):
+    """A tool hit the per-call ceiling. Deliberately not a TimeoutError: it is
+    never retried (a non-idempotent write could repeat), only reported."""
+
+
 def is_transient(exc: BaseException) -> bool:
     """True for errors worth retrying: timeouts, connection and transport faults, 429/5xx."""
+    if isinstance(exc, ToolTimeoutError):
+        return False
     if isinstance(
         exc, (TimeoutError, asyncio.TimeoutError, ConnectionError, httpx.TransportError)
     ):

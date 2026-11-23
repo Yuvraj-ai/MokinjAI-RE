@@ -18,6 +18,7 @@ from app.crypto import decrypt_api_key
 from app.logging import logger
 from app.models.connector import ConnectorInstance
 from app.services.agent_resilience import short_message
+from app.services.agent_resilience import ToolTimeoutError
 from app.services.agent_tools import TOOL_TIMEOUT_S
 from app.services.connector_catalog import CatalogEntry, get_entry
 
@@ -201,7 +202,12 @@ def with_timeout(tool: BaseTool) -> BaseTool:
         return tool
 
     async def bounded(**kwargs):
-        return await asyncio.wait_for(inner(**kwargs), timeout=TOOL_TIMEOUT_S)
+        try:
+            return await asyncio.wait_for(inner(**kwargs), timeout=TOOL_TIMEOUT_S)
+        except asyncio.TimeoutError as exc:
+            raise ToolTimeoutError(
+                f"`{tool.name}` did not finish within {TOOL_TIMEOUT_S:g}s"
+            ) from exc
 
     return StructuredTool(
         name=tool.name,

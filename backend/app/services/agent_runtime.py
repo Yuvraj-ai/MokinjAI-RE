@@ -741,6 +741,24 @@ async def _delete_assistant_message(assistant_message_id: str) -> None:
             await db.commit()
 
 
+async def _discard_refused_turn(
+    user_message_id: str | None, session_id: str, *, drop_session: bool
+) -> None:
+    """A refused (429) turn leaves nothing behind, so the client's retry does
+    not store the user message twice. Short session; none is held while queued."""
+    async with async_session() as db:
+        if user_message_id is not None:
+            row = await db.get(ChatMessage, user_message_id)
+            if row is not None:
+                await db.delete(row)
+        if drop_session:
+            await db.flush()
+            session_row = await db.get(ChatSession, session_id)
+            if session_row is not None:
+                await db.delete(session_row)
+        await db.commit()
+
+
 async def _flush_activity(assistant_message_id: str, activity: list[dict]) -> None:
     """Persist the activity seen so far, without touching status/content.
 
@@ -766,6 +784,7 @@ async def stream_turn(
     output_format: str = DEFAULT_OUTPUT_FORMAT,
     *,
     emit_content_reset: bool = False,
+    session_created_by_turn: bool = False,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run one playground turn (spec §6-7): persist both messages, stream the
     v2 protocol, and keep the assistant row's activity log identical to what
@@ -1067,7 +1086,11 @@ async def stream_turn(
                     "id": str(event.get("run_id") or name),
                     "name": name,
                     "kind": _tool_kind(name),
-                    "error": _cap(str(event["data"].get("error") or "the tool failed")),
+                    "error": _cap(
+                        short_message(
+                            Exception(str(event["data"].get("error") or "the tool failed"))
+                        )
+                    ),
                 }
 
             elif (
@@ -1181,6 +1204,9 @@ async def stream_turn(
         )
         if assistant_message_id is not None:
             await _delete_assistant_message(assistant_message_id)
+        await _discard_refused_turn(
+            user_message_id, session_id, drop_session=session_created_by_turn
+        )
         yield {
             "event": "error",
             "data": {
