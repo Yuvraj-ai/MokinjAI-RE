@@ -953,3 +953,105 @@ class TestOutputFormatPrompt:
 
         source = inspect.getsource(agent_runtime._subagent_runner)
         assert "output_format" not in source
+
+
+def _tool_event(kind, run_id, ns, **data):
+    # Real streams (probed): on_tool_start has no tool_call_id; every attempt of
+    # one call shares langgraph_checkpoint_ns, and on_tool_error/on_tool_end
+    # carry data["tool_call_id"].
+    return {
+        "event": kind,
+        "run_id": run_id,
+        "name": "flaky",
+        "metadata": {"langgraph_checkpoint_ns": f"tools:{ns}"},
+        "data": data,
+    }
+
+
+class RetryGraph:
+    def __init__(self, events):
+        self._events = events
+
+    async def astream_events(self, payload, version):
+        for event in self._events:
+            yield event
+        yield {
+            "event": "on_chain_end",
+            "name": "LangGraph",
+            "parent_ids": [],
+            "metadata": {},
+            "data": {"output": {"messages": [AIMessage(content="ok")]}},
+        }
+
+
+class TestToolRetryActivity:
+    async def _run(self, db_session, session_factory, test_workspace, monkeypatch, events):
+        agent, chat_session, execution = await _setup(db_session, test_workspace)
+        _install(monkeypatch, session_factory, RetryGraph(events))
+        out = [
+            e
+            async for e in stream_turn(
+                test_workspace.id, chat_session.id, "hi", execution.id
+            )
+        ]
+        return [e["data"] for e in out if e["event"] == "activity"]
+
+    @pytest.mark.asyncio
+    async def test_retried_call_streams_one_card(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        events = []
+        for i in range(3):
+            events.append(_tool_event("on_tool_start", f"r{i}", "A", input={"x": 1}))
+            events.append(
+                _tool_event(
+                    "on_tool_error", f"r{i}", "A", input={"x": 1},
+                    error="boom", tool_call_id="call_abc",
+                )
+            )
+        events.append({"event": "on_chain_end", "name": "tools", "metadata": {}, "data": {}})
+        activity = await self._run(
+            db_session, session_factory, test_workspace, monkeypatch, events
+        )
+        starts = [a for a in activity if a["type"] == "tool_start"]
+        ends = [a for a in activity if a["type"] == "tool_end"]
+        assert len(starts) == 1 and len(ends) == 1
+        assert starts[0]["id"] == ends[0]["id"]
+        assert ends[0]["error"] == "boom"
+        assert ends[0]["attempts"] == 3
+
+    @pytest.mark.asyncio
+    async def test_retry_that_succeeds_is_one_card_with_attempts(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        events = [
+            _tool_event("on_tool_start", "r0", "A", input={}),
+            _tool_event("on_tool_error", "r0", "A", input={}, error="boom", tool_call_id="c"),
+            _tool_event("on_tool_start", "r1", "A", input={}),
+            _tool_event("on_tool_end", "r1", "A", output="fine", tool_call_id="c"),
+        ]
+        activity = await self._run(
+            db_session, session_factory, test_workspace, monkeypatch, events
+        )
+        ends = [a for a in activity if a["type"] == "tool_end"]
+        assert [a["type"] for a in activity] == ["tool_start", "tool_end"]
+        assert ends[0]["result"] == "fine" and "error" not in ends[0]
+        assert ends[0]["attempts"] == 2
+
+    @pytest.mark.asyncio
+    async def test_single_attempt_has_no_attempts_field_and_parallel_calls_stay_separate(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        events = [
+            _tool_event("on_tool_start", "a", "A", input={}),
+            _tool_event("on_tool_start", "b", "B", input={}),
+            _tool_event("on_tool_end", "a", "A", output="1"),
+            _tool_event("on_tool_end", "b", "B", output="2"),
+        ]
+        activity = await self._run(
+            db_session, session_factory, test_workspace, monkeypatch, events
+        )
+        assert len([a for a in activity if a["type"] == "tool_start"]) == 2
+        ends = [a for a in activity if a["type"] == "tool_end"]
+        assert len(ends) == 2 and all("attempts" not in e for e in ends)
+        assert {e["id"] for e in ends} == {"a", "b"}

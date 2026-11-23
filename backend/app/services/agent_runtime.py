@@ -700,7 +700,14 @@ async def stream_turn(
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
     activity: list[dict[str, Any]] = []
-    tool_started: dict[str, float] = {}
+    # One entry per in-flight tool call. ToolRetryMiddleware re-runs a failing
+    # tool inside the same call; each attempt streams its own run_id but all
+    # share langgraph_checkpoint_ns (the tool_call_id only appears on the
+    # end/error events, not the start). Keying by the ns keeps one card.
+    tool_calls: dict[str, dict[str, Any]] = {}
+    # A failed attempt is held back: it is only the call's real end if no
+    # retry start for the same call follows.
+    pending_errors: dict[str, dict[str, Any]] = {}
     usage = new_usage()
     model_snapshot: tuple[str, str] | None = None
     ttft_ms: int | None = None
@@ -710,6 +717,29 @@ async def stream_turn(
     def _remember(event: dict[str, Any]) -> None:
         if len(activity) < ACTIVITY_EVENT_CAP:
             activity.append(event)
+
+    def _tool_key(event: dict[str, Any]) -> str:
+        ns = str((event.get("metadata") or {}).get("langgraph_checkpoint_ns", ""))
+        return ns or str(event.get("run_id") or event.get("name", ""))
+
+    def _finish_tool(key: str, entry: dict[str, Any]) -> dict[str, Any]:
+        call = tool_calls.pop(key, None)
+        if call is None:
+            # End without a seen start: keep the event's own run_id.
+            call = {"id": entry["id"], "started": None, "attempts": 1}
+        entry["id"] = call["id"]
+        entry["duration_ms"] = (
+            int((time.monotonic() - call["started"]) * 1000) if call["started"] else None
+        )
+        if call["attempts"] > 1:
+            entry["attempts"] = call["attempts"]
+        _remember(entry)
+        return entry
+
+    def _release_pending() -> list[dict[str, Any]]:
+        released = [_finish_tool(key, entry) for key, entry in pending_errors.items()]
+        pending_errors.clear()
+        return released
 
     try:
         async with async_session() as db:
@@ -820,6 +850,12 @@ async def stream_turn(
             metadata = event.get("metadata") or {}
             nested = "|" in str(metadata.get("langgraph_checkpoint_ns", ""))
 
+            if pending_errors and not nested and not kind.startswith("on_tool_"):
+                # Something other than a tool event: no retry is coming.
+                for released in _release_pending():
+                    await _flush_activity(assistant_message_id, activity)
+                    yield {"event": "activity", "data": released}
+
             if kind == "on_chat_model_stream" and not nested:
                 chunk = event["data"].get("chunk")
                 reasoning = _reasoning_delta(chunk)
@@ -848,7 +884,17 @@ async def stream_turn(
                     content_parts.clear()
                     yield {"event": "content_reset", "data": {}}
                 run_id = str(event.get("run_id") or event.get("name", ""))
-                tool_started[run_id] = time.monotonic()
+                key = _tool_key(event)
+                if key in tool_calls:
+                    # A retry of a call that already has a card.
+                    tool_calls[key]["attempts"] += 1
+                    pending_errors.pop(key, None)
+                    continue
+                tool_calls[key] = {
+                    "id": run_id,
+                    "started": time.monotonic(),
+                    "attempts": 1,
+                }
                 name = event.get("name", "")
                 entry = {
                     "type": "tool_start",
@@ -864,44 +910,35 @@ async def stream_turn(
                 yield {"event": "activity", "data": entry}
 
             elif kind == "on_tool_end" and not nested:
-                run_id = str(event.get("run_id") or event.get("name", ""))
                 name = event.get("name", "")
-                started_at = tool_started.pop(run_id, None)
-                duration_ms = (
-                    int((time.monotonic() - started_at) * 1000) if started_at else None
+                key = _tool_key(event)
+                pending_errors.pop(key, None)
+                entry = _finish_tool(
+                    key,
+                    {
+                        "type": "tool_end",
+                        "id": str(event.get("run_id") or name),
+                        "name": name,
+                        "kind": _tool_kind(name),
+                        "result": _cap(event["data"].get("output")),
+                    },
                 )
-                entry = {
-                    "type": "tool_end",
-                    "id": run_id,
-                    "name": name,
-                    "kind": _tool_kind(name),
-                    "result": _cap(event["data"].get("output")),
-                    "duration_ms": duration_ms,
-                }
-                _remember(entry)
                 await _flush_activity(assistant_message_id, activity)
                 yield {"event": "activity", "data": entry}
 
             elif kind == "on_tool_error" and not nested:
                 # LangGraph emits this instead of on_tool_end when the tool
                 # raises; without it the card would say "Calling…" forever.
-                run_id = str(event.get("run_id") or event.get("name", ""))
+                # Held back until we know no retry follows (see above).
                 name = event.get("name", "")
-                started_at = tool_started.pop(run_id, None)
-                duration_ms = (
-                    int((time.monotonic() - started_at) * 1000) if started_at else None
-                )
-                entry = {
+                key = _tool_key(event)
+                pending_errors[key] = {
                     "type": "tool_end",
-                    "id": run_id,
+                    "id": str(event.get("run_id") or name),
                     "name": name,
                     "kind": _tool_kind(name),
                     "error": _cap(str(event["data"].get("error") or "the tool failed")),
-                    "duration_ms": duration_ms,
                 }
-                _remember(entry)
-                await _flush_activity(assistant_message_id, activity)
-                yield {"event": "activity", "data": entry}
 
             elif (
                 kind == "on_chain_end"
@@ -914,6 +951,9 @@ async def stream_turn(
                     if final_messages:
                         final_text = _message_text(final_messages[-1])
                     structured = output.get("structured_response")
+
+        for released in _release_pending():
+            yield {"event": "activity", "data": released}
 
         text = final_text or "".join(content_parts)
         if not streamed and text:
