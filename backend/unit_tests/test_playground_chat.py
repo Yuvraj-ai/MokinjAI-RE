@@ -477,6 +477,84 @@ class TestStreamTurn:
         assert staged == [{"type": "files_staged", "names": ["a.csv", "b.csv"]}]
 
     @pytest.mark.asyncio
+    async def test_missing_file_reaches_prompt_list_and_event(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        agent, chat_session, execution = await _setup(db_session, test_workspace)
+        graph = FakeGraphV2()
+        seen: dict[str, list[str]] = {}
+
+        def capture_build(validated, agent_row, tools, *, unavailable=None, **_):
+            seen["graph"] = list(unavailable or [])
+            return graph
+
+        monkeypatch.setattr("app.services.agent_runtime.async_session", session_factory)
+        monkeypatch.setattr("app.services.agent_runtime.build_graph", capture_build)
+
+        async def fake_stage(documents):
+            return None, [], ["gone.csv"]
+
+        monkeypatch.setattr("app.services.agent_runtime._stage_files", fake_stage)
+
+        events = [
+            event
+            async for event in stream_turn(
+                test_workspace.id, chat_session.id, "hi", execution.id
+            )
+        ]
+        expected = "File gone.csv (not found in storage)"
+        assert expected in seen["graph"]
+        unavailable = [
+            e["data"]
+            for e in events
+            if e["event"] == "activity" and e["data"]["type"] == "unavailable"
+        ]
+        assert unavailable and expected in unavailable[0]["names"]
+
+    @pytest.mark.asyncio
+    async def test_subagent_runner_passes_missing_file_as_unavailable(
+        self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
+    ):
+        from app.services import agent_runtime
+
+        agent, _chat_session, _execution = await _setup(db_session, test_workspace)
+        seen: dict[str, list[str]] = {}
+
+        class _Session:
+            def close(self):
+                pass
+
+        class _Graph:
+            async def ainvoke(self, _input):
+                return {"messages": [AIMessage(content="ok")]}
+
+        async def fake_stage(documents):
+            return None, [], ["gone.csv"]
+
+        async def fake_build_tools(*_a, unavailable=None, **_k):
+            seen["tools"] = list(unavailable or [])
+            return []
+
+        def fake_build_graph(*_a, unavailable=None, **_k):
+            seen["graph"] = list(unavailable or [])
+            return _Graph()
+
+        monkeypatch.setattr(agent_runtime, "async_session", session_factory)
+        monkeypatch.setattr(agent_runtime, "_stage_files", fake_stage)
+        monkeypatch.setattr(agent_runtime, "_open_session", lambda *a, **k: (_Session(), 0))
+        monkeypatch.setattr(agent_runtime, "build_tools", fake_build_tools)
+        monkeypatch.setattr(agent_runtime, "build_graph", fake_build_graph)
+
+        result = await agent_runtime._subagent_runner(
+            test_workspace.id, agent.id, 1
+        )("do it")
+
+        assert result == "ok"
+        expected = ["File gone.csv (not found in storage)"]
+        assert seen["tools"] == expected
+        assert seen["graph"] == expected
+
+    @pytest.mark.asyncio
     async def test_live_config_reread_between_turns(
         self, db_session, session_factory, test_workspace, monkeypatch, encryption_key
     ):
